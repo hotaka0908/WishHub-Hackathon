@@ -216,6 +216,7 @@ const Audio_ = (() => {
       thump(215 + 50 * s, 50, 0.22 + 0.08 * s, 0.82 + 0.18 * s);   // ドスッ（強化）
       thump(68, 32, 0.42 + 0.1 * s, 0.5 + 0.12 * s);               // ドゥーン（サブブーム）
       crunch(0.1 + 0.04 * s, 0.6 + 0.2 * s, 2600 + 300 * s, 600, 14 + 9 * s); // バキッ
+      tone("triangle", 2500, 1500, 0.14 + 0.04 * s, 0.1 + 0.03 * s);          // キィン（抜ける高音シマー）
       // === 技ごとの味付け ===
       if (pose === "punch") {
         // バキィン：金属的な鋭いリングで派手に
@@ -444,10 +445,12 @@ function moveKeyframes(move) {
       strike: { fHip: 1.45, fKnee: 1.6, bHip: -0.15, bKnee: -0.9, lean: -0.08, fSh: -0.25, bSh: 0.6, fEl: 1.4, hipH: 98 },
     };
   }
-  if (move.pose === "spin") { // 両手を大きく振り回して叩きつける
+  if (move.pose === "spin") { // 頭上に振りかぶって全力で叩きつける（かかと落とし的な振り下ろし）
     return {
-      windup: { fSh: 3.35, fEl: 3.5, bSh: 3.35, bEl: 3.5, lean: -0.36, hipH: 92, fHip: 0.5, bHip: -0.45 },
-      strike: { fSh: 1.5, fEl: 1.55, bSh: 1.45, bEl: 1.5, lean: 0.64, hipH: 96, fHip: 0.72, bHip: -0.55, fKnee: 0.4 },
+      // タメ：両腕を真上に高く振りかぶり、のけぞって伸び上がる（つま先立ち）
+      windup: { fSh: 3.05, fEl: 3.18, bSh: 2.98, bEl: 3.18, lean: -0.6, hipH: 108, fHip: 0.3, bHip: -0.5, fKnee: -0.15, bKnee: -0.1 },
+      // 叩きつけ：腕を真下〜前方へ振り下ろし、深く沈み込んで体重を乗せる
+      strike: { fSh: 0.55, fEl: 0.30, bSh: 0.5, bEl: 0.30, lean: 0.92, hipH: 74, fHip: 0.9, bHip: -0.35, fKnee: 0.8, bKnee: 0.5 },
     };
   }
   if (move.pose === "upper") { // 昇龍：深くしゃがんで爆発的に立ち上がる
@@ -558,13 +561,17 @@ class Fighter {
     const knockdown = isUlt || !!move.lunge || !!move.up || dmg >= 13;
     const fatal = this.hp <= 0;
 
+    // コンボが伸びるほど派手さが増す（脳汁ブースト）
+    const cc = Math.min(6, this.hitCombo || 1);
+    const juice = 1 + (cc - 1) * 0.14;
+
     if (isUlt) {
       // ===== 必殺技ヒット：超派手・シネマ演出 =====
-      game.hitstop = Math.max(game.hitstop, 0.34);          // ガッと止める（インパクト）
-      game.setSlow(1.0, 0.14);                              // 深く長いスローモー
-      game.cineZoom(0.85, hx, hy);                          // 衝撃点へズーム
-      game.shake = Math.max(game.shake, 44);
-      game.flash = 0.55; game.flashMax = 0.55; game.flashColor = "#ffffff";
+      game.hitstop = Math.max(game.hitstop, 0.38);          // ガッと止める（インパクト）
+      game.setSlow(1.05, 0.11);                             // 深く長いスローモー
+      game.cineZoom(0.9, hx, hy, 0.40);                     // 衝撃点へ大ズーム
+      game.shake = Math.max(game.shake, 56);
+      game.flash = 0.6; game.flashMax = 0.6; game.flashColor = "#ffffff";
       game.showCallout(fatal ? "FINISH!!" : "BREAK!", fatal ? "#ffd23d" : "#9fe8ff");
       // 多重衝撃波（速さ違いで層になる）
       game.fx.megashock(hx, hy);
@@ -572,23 +579,34 @@ class Fighter {
       game.fx.burst(hx, hy, "#baf0ff");
       game.fx.speedlines(hx, hy, "#ffffff");
       game.fx.speedlines(hx, hy, "#bfe8ff");
-      game.fx.blast(hx, hy, "#cde0ff", 70, 1.9);
-      game.fx.blast(hx, hy, "#ffffff", 30, 1.3);
-      game.fx.blast(hx, hy, "#ffd36b", 26, 1.1);
+      game.fx.blast(hx, hy, "#cde0ff", 84, 2.1);
+      game.fx.blast(hx, hy, "#ffffff", 38, 1.4);
+      game.fx.blast(hx, hy, "#ffd36b", 32, 1.2);
     } else if (knockdown) {
-      // ===== 大技ヒット：しっかりした手応え =====
-      game.hitstop = Math.max(game.hitstop, 0.12);
-      game.slow = Math.max(game.slow, 0.12);
-      game.shake = Math.max(game.shake, Math.min(24, 10 + dmg));
+      // ===== 大技ヒット：ドカン！と派手に =====
+      game.hitstop = Math.max(game.hitstop, 0.17);
+      game.setSlow(0.5 * juice, 0.15);                      // しっかり効くスロー
+      game.cineZoom(0.24, hx, hy, 0.16);                    // ズームパンチ
+      game.shake = Math.max(game.shake, (20 + dmg) * juice);
+      if (game.flash < 0.24) { game.flash = 0.24; game.flashMax = 0.24; game.flashColor = "#fff2c8"; }
+      game.fx.megashock(hx, hy);
+      game.fx.speedlines(hx, hy, "#ffe39a");
       game.fx.burst(hx, hy, "#fff2b0");
       game.fx.ring(hx, hy, "#fff2b0");
-      game.fx.blast(hx, hy, "#ffd36b", 20, 1);
+      game.fx.blast(hx, hy, "#ffd36b", 36, 1.3);
+      game.fx.blast(hx, hy, "#ffffff", 18, 0.9);
     } else {
-      // ===== 軽い打撃：のけぞり =====
-      game.hitstop = Math.max(game.hitstop, 0.06);
-      game.shake = Math.max(game.shake, 7 + dmg * 0.6);
-      game.fx.spark(hx, hy, fromDir, "#ffd36b", 12 + dmg);
+      // ===== 軽い打撃：それでも気持ちよく弾ける =====
+      game.hitstop = Math.max(game.hitstop, 0.09);
+      game.setSlow(0.16, 0.1);                              // 一瞬キュッと止まるキレ
+      game.cineZoom(0.14, hx, hy, 0.07);                    // 小さなズームパンチ
+      game.shake = Math.max(game.shake, (12 + dmg) * juice);
+      if (game.flash < 0.14) { game.flash = 0.14; game.flashMax = 0.14; game.flashColor = "#fff6cf"; }
+      game.fx.spark(hx, hy, fromDir, "#ffd36b", 20 + dmg);
       game.fx.ring(hx, hy, "#fff2b0");
+      game.fx.burst(hx, hy, "#fff6cf");
+      game.fx.blast(hx, hy, "#ffd36b", 16, 0.9);
+      if (cc >= 3) game.fx.speedlines(hx, hy, "#ffe39a");   // コンボが乗ると速度線
     }
 
     if (fatal) { this._ko(game, fromDir, isUlt); return; }
