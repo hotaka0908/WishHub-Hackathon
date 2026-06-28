@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
-<div id="hint">← → 移動 ・ A〜Z 連打で攻撃（5種ループ）・ 攻撃が当たるとゲージが溜まり、満タンで必殺技が自動発動 ・ Enter 決定 / リスタート</div>
+<div id="hint">Enter 決定 / リスタート</div>
 <script>
 "use strict";
 /* =====================================================================
@@ -1666,11 +1666,6 @@ class Game {
     ctx.font = "bold 26px system-ui"; ctx.fillStyle = "#fff";
     const blink = Math.sin(this.t * 4) > -0.3;
     if (blink) ctx.fillText("Press ENTER to Fight", W / 2, H * 0.52);
-    // 操作説明（新仕様）
-    ctx.font = "bold 20px system-ui"; ctx.fillStyle = "#9fb0d8";
-    ctx.fillText("← →  移動    A〜Z 連打  攻撃", W / 2, H * 0.62);
-    ctx.fillStyle = "#ffd23d";
-    ctx.fillText("ゲージ満タンで 必殺技が自動発動！", W / 2, H * 0.67);
     ctx.restore();
   }
 
