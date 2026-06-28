@@ -50,7 +50,12 @@ const Audio_ = (() => {
   function ensure() {
     if (ac) return;
     ac = new (window.AudioContext || window.webkitAudioContext)();
-    master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination);
+    master = ac.createGain(); master.gain.value = 0.95;
+    // 打撃の派手な瞬間音を潰さずに音量を稼ぐためのコンプ／リミッタ
+    const comp = ac.createDynamicsCompressor();
+    comp.threshold.value = -10; comp.knee.value = 20; comp.ratio.value = 12;
+    comp.attack.value = 0.002; comp.release.value = 0.15;
+    master.connect(comp); comp.connect(ac.destination);
     musicGain = ac.createGain(); musicGain.gain.value = 0.16; musicGain.connect(master);
     // ノイズバッファ
     const len = ac.sampleRate * 1.0;
@@ -82,14 +87,55 @@ const Audio_ = (() => {
     o.connect(g); g.connect(dest || master);
     o.start(); o.stop(now() + dur + 0.02);
   }
+  // 歪み(ディストーション)カーブ — ザクッ／バリッとした質感用
+  function distCurve(k) {
+    const n = 256, c = new Float32Array(n);
+    for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = (1 + k) * x / (1 + k * Math.abs(x)); }
+    return c;
+  }
+  // 歪ませた砕けるノイズ一発（ザク／パン）
+  function crunch(dur, vol, lpStart, lpEnd, drive, dest) {
+    const src = ac.createBufferSource(); src.buffer = noiseBuf;
+    const ws = ac.createWaveShaper(); ws.curve = distCurve(drive); ws.oversample = "2x";
+    const lp = ac.createBiquadFilter(); lp.type = "lowpass";
+    lp.frequency.setValueAtTime(lpStart, now());
+    lp.frequency.exponentialRampToValueAtTime(Math.max(60, lpEnd), now() + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, now());
+    g.gain.exponentialRampToValueAtTime(0.0008, now() + dur);
+    src.connect(ws); ws.connect(lp); lp.connect(g); g.connect(dest || master);
+    src.start(); src.stop(now() + dur + 0.02);
+  }
+  // 腹に来る低音ボディ（ダン／バン）— 急降下するキック的アタック
+  function thump(f0, f1, dur, vol, dest) {
+    const o = ac.createOscillator(); const g = ac.createGain();
+    o.type = "sine"; o.frequency.setValueAtTime(f0, now());
+    o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), now() + dur * 0.6);
+    g.gain.setValueAtTime(vol, now());
+    g.gain.exponentialRampToValueAtTime(0.0008, now() + dur);
+    o.connect(g); g.connect(dest || master);
+    o.start(); o.stop(now() + dur + 0.02);
+  }
 
   const api = {
     resume,
-    whiff(strength) { ensure(); noise(0.12 + 0.05 * strength, 0.18, 1600 + 400 * strength, 300); },
+    whiff(strength) {
+      ensure();
+      // 風切り＋ちょいザラつきで「ザッ」とした振り
+      noise(0.12 + 0.05 * strength, 0.18, 1600 + 400 * strength, 300);
+      crunch(0.05 + 0.02 * strength, 0.12 + 0.04 * strength, 3000, 700, 8);
+    },
     hit(strength) {
       ensure();
-      noise(0.09 + 0.04 * strength, 0.5, 3500, 500);
-      tone("square", 120 + 30 * strength, 50, 0.12 + 0.04 * strength, 0.28);
+      const s = strength; // 0=軽い / 1=重い
+      // ザクッ：歪んだ高音ノイズの砕けるアタック
+      crunch(0.06 + 0.03 * s, 0.6 + 0.18 * s, 5200, 800, 18 + 14 * s);
+      // バチッ：中音の鋭いスナップ
+      tone("square", 230 + 40 * s, 60, 0.07 + 0.02 * s, 0.32);
+      // ダン！：腹に来る低音ボディ
+      thump(155 + 30 * s, 42, 0.18 + 0.06 * s, 0.55 + 0.12 * s);
+      // 重い一撃はさらにドスッと余韻＆追い打ちのザラつき
+      if (s) { thump(80, 36, 0.28, 0.42); crunch(0.05, 0.32, 3200, 400, 26); }
     },
     block() { ensure(); noise(0.09, 0.4, 6000, 2500); tone("triangle", 700, 400, 0.08, 0.15); },
     special() {
@@ -495,12 +541,21 @@ class Fighter {
         this.vx += st * this.facing;
         if (m.dmg >= 14 || m.lunge) game.shake = Math.max(game.shake, 4);
       }
-      // 必殺技の発射
+      // 必殺技の発射（発動カットイン）
       if (m.projectile && !a.fired && a.t >= m.hs) {
         a.fired = true;
         Audio_.ultimate();
         game.spawnProjectile(this);
-        game.shake = Math.max(game.shake, 8);
+        game.shake = Math.max(game.shake, 16);
+        game.hitstop = Math.max(game.hitstop, 0.06);          // 撃つ瞬間に一瞬タメ
+        game.setSlow(0.4, 0.28);                              // 発動スロー
+        game.flash = 0.28; game.flashMax = 0.28; game.flashColor = "#cfeaff";
+        game.showCallout(ULTIMATE.name + "！", "#9fe8ff");
+        const sx = this.x + this.facing * 30, sy = this.y - 110;
+        game.fx.shock(sx, sy, "#7fd6ff");
+        game.fx.speedlines(sx, sy, "#cfeaff");
+        game.fx.blast(sx, sy, "#cde0ff", 30, 1.1);
+        game.fx.ring(sx, sy, "#ffffff");
       }
       if (a.t >= m.dur) { this.state = "idle"; this.attack = null; }
     }
@@ -1410,8 +1465,9 @@ class Game {
     this.round = 1;
     this.banner = ""; this.bannerT = 0;
     this.timer = 60;
-    this.hitstop = 0; this.shake = 0; this.slow = 0;
+    this.hitstop = 0; this.shake = 0; this.slow = 0; this.slowFactor = 0.35;
     this.flash = 0; this.flashMax = 1; this.flashColor = "#ffffff";
+    this.cine = 0; this.cineMax = 1; this.zoomFocus = { x: W / 2, y: H / 2 }; // シネマズーム
     this.t = 0;
     this.koTarget = null;
     this.firstHit = false;
@@ -1436,7 +1492,11 @@ class Game {
     this.state = "ready"; this.banner = "ROUND " + this.round; this.bannerT = 1.4;
     Audio_.round();
   }
-  spawnProjectile(owner) { this.projectiles.push(new Projectile(owner)); Audio_.fire(); }
+  spawnProjectile(owner) { this.projectiles.push(new Projectile(owner, this)); Audio_.fire(); }
+  // スロー演出（残り時間と倍率を指定。倍率が小さいほど遅い）
+  setSlow(dur, factor) { if (dur > this.slow) this.slow = dur; this.slowFactor = Math.min(this.slowFactor, factor); }
+  // 衝撃点へのシネマズーム（dur 秒かけて戻る）
+  cineZoom(dur, x, y) { this.cine = dur; this.cineMax = dur; this.zoomFocus = { x, y }; }
   onKO(loser) {
     if (this.state !== "fight") return;
     this.koTarget = loser;
@@ -1544,11 +1604,13 @@ class Game {
       return;
     }
 
+    // シネマズームの減衰（演出中も進める）
+    if (this.cine > 0) this.cine -= dt;
     // ヒットストップ（この間フラッシュは保持＝バーンが一瞬止まる）
     if (this.hitstop > 0) { this.hitstop -= dt; this.fx.update(dt * 0.15); return; }
-    // スローモー
+    // スローモー（slowFactor が小さいほど深いスロー）
     let sdt = dt;
-    if (this.slow > 0) { this.slow -= dt; sdt = dt * 0.35; }
+    if (this.slow > 0) { this.slow -= dt; sdt = dt * this.slowFactor; if (this.slow <= 0) this.slowFactor = 0.35; }
     if (this.flash > 0) this.flash -= dt;
 
     if (this.state === "ready") {
