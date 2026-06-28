@@ -161,24 +161,22 @@ const Input = (() => {
       const k = key.toLowerCase();
       e.preventDefault();
       if (e.repeat) return;
-      let s = ks[k] || (ks[k] = {});
-      if (s.pendingNormal) {                 // 2回目押下 → 特別技
-        clearTimeout(s.pendingNormal); s.pendingNormal = null; s.awaitingDouble = true;
-      } else s.awaitingDouble = false;
-      s.down = true; s.pressTime = performance.now(); s.holdFired = false; s.charged = false;
+      const s = ks[k] || (ks[k] = {});
+      const t = performance.now();
+      s.down = true; s.pressTime = t; s.holdFired = false; s.charged = false;
+      // 押した瞬間に発生（遅延なし）。同じキーを素早く2回押すと特別技。
+      if (s.lastTap && t - s.lastTap < DOUBLE) {
+        queue.push({ kind: "special", g: group(k) }); s.lastTap = 0;
+      } else {
+        queue.push({ kind: "normal", g: group(k) }); s.lastTap = t;
+      }
     }
   });
   window.addEventListener("keyup", (e) => {
     const key = e.key;
     if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = false; return; }
     if (/^[a-zA-Z]$/.test(key)) {
-      const k = key.toLowerCase(); const s = ks[k]; if (!s) return;
-      s.down = false;
-      if (s.holdFired) return;                // 必殺技は発動済み
-      if (s.awaitingDouble) { queue.push({ kind: "special", g: group(k) }); s.awaitingDouble = false; return; }
-      s.pendingNormal = setTimeout(() => {     // 一定時間2回目が来なければ通常技
-        queue.push({ kind: "normal", g: group(k) }); s.pendingNormal = null;
-      }, DOUBLE);
+      const s = ks[key.toLowerCase()]; if (s) s.down = false;
     }
   });
   window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
@@ -206,21 +204,21 @@ const Input = (() => {
    ===================================================================== */
 // アルファベットを押すたびに、この5種を順番にループする
 const NORMALS = [
-  { name: "弱パンチ",           pose: "punch",    arm: "front", dur: .28, hs: .06, he: .14, dmg: 6,  reach: 96,  kb: 130, up: 0,   meter: 6 },
-  { name: "強パンチ",           pose: "punch",    arm: "back",  dur: .46, hs: .15, he: .25, dmg: 11, reach: 110, kb: 240, up: 0,   meter: 9 },
-  { name: "ジャンプキック",     pose: "jumpkick", arm: "front", dur: .58, hs: .20, he: .36, dmg: 13, reach: 122, kb: 250, up: -80, meter: 11, hop: 130 },
-  { name: "ダイナミックキック", pose: "kick",     arm: "back",  dur: .58, hs: .20, he: .34, dmg: 15, reach: 134, kb: 300, up: -60, meter: 12 },
-  { name: "大車輪パンチ",       pose: "spin",     arm: "front", dur: .62, hs: .24, he: .42, dmg: 14, reach: 114, kb: 300, up: 0,   meter: 12 },
+  { name: "弱パンチ",           pose: "punch",    arm: "front", dur: .18, hs: .03, he: .10, dmg: 6,  reach: 96,  kb: 130, up: 0,   meter: 6 },
+  { name: "強パンチ",           pose: "punch",    arm: "back",  dur: .30, hs: .08, he: .17, dmg: 11, reach: 110, kb: 240, up: 0,   meter: 9 },
+  { name: "ジャンプキック",     pose: "jumpkick", arm: "front", dur: .40, hs: .12, he: .26, dmg: 13, reach: 122, kb: 250, up: -80, meter: 11, hop: 130 },
+  { name: "ダイナミックキック", pose: "kick",     arm: "back",  dur: .40, hs: .12, he: .24, dmg: 15, reach: 134, kb: 300, up: -60, meter: 12 },
+  { name: "大車輪パンチ",       pose: "spin",     arm: "front", dur: .42, hs: .14, he: .29, dmg: 14, reach: 114, kb: 300, up: 0,   meter: 12 },
 ];
 // 同じ位置の強化版（2回押し=特別技 / ゲージ不足の必殺技代替）
 const SPECIALS = [
-  { name: "連打突き",       pose: "punch",    arm: "front", dur: .50, hs: .12, he: .30, dmg: 16, reach: 132, kb: 320, up: 0,    meter: 14, lunge: 240 },
-  { name: "豪打",           pose: "punch",    arm: "back",  dur: .60, hs: .18, he: .34, dmg: 20, reach: 144, kb: 430, up: -60,  meter: 16, lunge: 200 },
-  { name: "流星脚",         pose: "jumpkick", arm: "front", dur: .64, hs: .20, he: .42, dmg: 19, reach: 152, kb: 380, up: -240, meter: 15, lunge: 220, hop: 180 },
-  { name: "竜巻脚",         pose: "kick",     arm: "back",  dur: .60, hs: .16, he: .42, dmg: 20, reach: 156, kb: 380, up: -160, meter: 15, lunge: 230 },
-  { name: "大車輪・乱舞",   pose: "spin",     arm: "front", dur: .68, hs: .22, he: .48, dmg: 18, reach: 132, kb: 360, up: 0,    meter: 16, lunge: 180 },
+  { name: "連打突き",       pose: "punch",    arm: "front", dur: .38, hs: .08, he: .24, dmg: 16, reach: 132, kb: 320, up: 0,    meter: 14, lunge: 240 },
+  { name: "豪打",           pose: "punch",    arm: "back",  dur: .44, hs: .12, he: .26, dmg: 20, reach: 144, kb: 430, up: -60,  meter: 16, lunge: 200 },
+  { name: "流星脚",         pose: "jumpkick", arm: "front", dur: .48, hs: .13, he: .32, dmg: 19, reach: 152, kb: 380, up: -240, meter: 15, lunge: 220, hop: 180 },
+  { name: "竜巻脚",         pose: "kick",     arm: "back",  dur: .46, hs: .11, he: .32, dmg: 20, reach: 156, kb: 380, up: -160, meter: 15, lunge: 230 },
+  { name: "大車輪・乱舞",   pose: "spin",     arm: "front", dur: .50, hs: .15, he: .36, dmg: 18, reach: 132, kb: 360, up: 0,    meter: 16, lunge: 180 },
 ];
-const ULTIMATE = { name: "波動・烈", pose: "push", dur: .70, hs: .26, he: .34, projectile: true, dmg: 26, cost: 50 };
+const ULTIMATE = { name: "波動・烈", pose: "push", dur: .52, hs: .18, he: .28, projectile: true, dmg: 26, cost: 50 };
 const MAX_METER = 100;
 
 /* =====================================================================
@@ -302,6 +300,8 @@ class Fighter {
     this.name = opts.name;
     this.isCPU = !!opts.isCPU;
     this.colors = opts.colors;
+    // 体格・髪型などの差別化設定（骨格長は変えず見た目だけ変える＝挙動は不変）
+    this.build = Object.assign({ limbW: 1, torsoW: 1, headR: 15, hair: "spike", beard: false }, opts.build || {});
     this.startX = opts.x;
     this.comboIndex = 0;   // 攻撃ループ位置：被弾やラウンド交代では保持し、試合開始でのみ0に戻す
     this.reset(opts.facing);
@@ -323,6 +323,7 @@ class Fighter {
     this.trail = [];
     this.buffer = null; this.bufferT = 0;
     this.walkPhase = 0; this.clock = Math.random() * 10;
+    this.hairSway = 0; this.hairSwayV = 0;   // 髪・帯のなびき（バネ）
   }
   get airborne() { return this.airY < -1; }
   canAct() { return this.state !== "ko" && this.state !== "knockdown" && this.hitstun <= 0 && this.blockstun <= 0 && this.state !== "attack" && !this.airborne; }
@@ -431,6 +432,15 @@ class Fighter {
   update(dt, opp, game) {
     this.clock += dt;
     if (this.flash > 0) this.flash -= dt;
+    // 髪・帯のなびき：移動・上下動・転倒の勢いに遅れて追従するバネ
+    {
+      let tgt = Math.max(-1.4, Math.min(1.4, -this.vx * 0.03)); // 進行方向と逆へ流れる
+      tgt += Math.max(-1, Math.min(1, this.airVY * 0.004));      // 上下動でふわっと
+      if (this.state === "attack" && this.attack) tgt -= this.facing * 0.5; // 振りで揺れる
+      this.hairSwayV += (tgt - this.hairSway) * 120 * dt;        // 剛性
+      this.hairSwayV -= this.hairSwayV * 10 * dt;                // 減衰
+      this.hairSway += this.hairSwayV * dt;
+    }
     if (this.bufferT > 0) { this.bufferT -= dt; if (this.bufferT <= 0) this.buffer = null; }
 
     // --- 吹っ飛び / 打ち上げ / ダウン / KO 物理 ---
@@ -518,7 +528,7 @@ class Fighter {
       const toOpp = Math.sign(opp.x - this.x) || 1;
       if (cmd !== 0) {
         if (cmd === -toOpp && opp.state === "attack") { this.blocking = true; this.state = "block"; }
-        else { this.vx = cmd * 280; this.state = "walk"; this.walkPhase += 0.3; }
+        else { this.vx = cmd * 440; this.state = "walk"; this.walkPhase += 0.4; }
       }
     }
     this.cmdDir = 0;
@@ -693,29 +703,30 @@ class Fighter {
       ctx.closePath(); ctx.fill();
     }
     const edge = flashing ? "#ffffff" : "#0a0c18";
+    const B = this.build, lw = B.limbW;       // 体格：手足の太さ倍率
 
     // 奥脚・奥腕（暗め）
-    limb(hip.x, hip.y, bKnee.x, bKnee.y, 17, shade(cloth2, -.25), edge);
-    limb(bKnee.x, bKnee.y, bFoot.x, bFoot.y, 13, shade(skin, -.25), edge);
+    limb(hip.x, hip.y, bKnee.x, bKnee.y, 17 * lw, shade(cloth2, -.25), edge);
+    limb(bKnee.x, bKnee.y, bFoot.x, bFoot.y, 13 * lw, shade(skin, -.25), edge);
     drawFoot(ctx, bKnee, bFoot, f, shade(C.shoe, -.2), edge);
-    limb(shoulder.x, shoulder.y, bElbow.x, bElbow.y, 13, shade(cloth, -.22), edge);
-    limb(bElbow.x, bElbow.y, bHand.x, bHand.y, 11, shade(skin, -.22), edge);
-    drawHand(ctx, bHand, 9, shade(skin, -.22), edge);
+    limb(shoulder.x, shoulder.y, bElbow.x, bElbow.y, 13 * lw, shade(cloth, -.22), edge);
+    limb(bElbow.x, bElbow.y, bHand.x, bHand.y, 11 * lw, shade(skin, -.22), edge);
+    drawHand(ctx, bHand, 9 * lw, shade(skin, -.22), edge);
 
     // 胴（トルソ：肩〜腰のテーパー）
-    drawTorso(ctx, hip, shoulder, f, cloth, cloth2, edge, C.belt);
+    drawTorso(ctx, hip, shoulder, f, cloth, cloth2, edge, C.belt, B.torsoW);
 
     // 手前脚・手前腕（明るい）
-    limb(hip.x, hip.y, fKnee.x, fKnee.y, 18, cloth2, edge);
-    limb(fKnee.x, fKnee.y, fFoot.x, fFoot.y, 14, skin, edge);
+    limb(hip.x, hip.y, fKnee.x, fKnee.y, 18 * lw, cloth2, edge);
+    limb(fKnee.x, fKnee.y, fFoot.x, fFoot.y, 14 * lw, skin, edge);
     drawFoot(ctx, fKnee, fFoot, f, C.shoe, edge);
 
     // 頭
-    drawHead(ctx, head, f, skin, edge, C);
+    drawHead(ctx, head, f, skin, edge, C, B, this.hairSway);
 
-    limb(shoulder.x, shoulder.y, fElbow.x, fElbow.y, 14, cloth, edge);
-    limb(fElbow.x, fElbow.y, fHand.x, fHand.y, 12, skin, edge);
-    drawHand(ctx, fHand, 10, skin, edge);
+    limb(shoulder.x, shoulder.y, fElbow.x, fElbow.y, 14 * lw, cloth, edge);
+    limb(fElbow.x, fElbow.y, fHand.x, fHand.y, 12 * lw, skin, edge);
+    drawHand(ctx, fHand, 10 * lw, skin, edge);
 
     // 必殺技チャージ/発生オーラ
     if (this.state === "attack" && this.attack && this.attack.move.projectile) {
@@ -777,11 +788,12 @@ function shade(hex, amt) {
   b = Math.max(0, Math.min(255, b + amt * 255));
   return `rgb(${r | 0},${g | 0},${b | 0})`;
 }
-function drawTorso(ctx, hip, sh, f, cloth, cloth2, edge, belt) {
-  const hw = 15, sw = 25, waistY = lerp(sh.y, hip.y, 0.52);
+function drawTorso(ctx, hip, sh, f, cloth, cloth2, edge, belt, tw) {
+  tw = tw || 1;                                       // 体格：胴幅の倍率
+  const hw = 15 * tw, sw = 25 * tw, waistY = lerp(sh.y, hip.y, 0.52);
   const ax = sh.x - hip.x, ay = sh.y - hip.y, al = Math.hypot(ax, ay) || 1;
   const px = -ay / al, py = ax / al;                 // 体軸の法線（横方向）
-  const waistX = lerp(hip.x, sh.x, 0.52), ww = 13;
+  const waistX = lerp(hip.x, sh.x, 0.52), ww = 13 * tw;
   // 胴シルエット（肩広→腰くびれの逆三角）
   ctx.beginPath();
   ctx.moveTo(hip.x - px * hw, hip.y - py * hw);
