@@ -193,24 +193,51 @@ const Audio_ = (() => {
 
   const api = {
     resume,
-    whiff(strength) {
+    whiff(strength, pose) {
       ensure();
-      // 抜けの良い「スパッ」とした風切り（ハイパスでこもらせない）
-      crack(0.1 + 0.04 * strength, 0.16 + 0.05 * strength, 1200, 4000 + 800 * strength);
+      const s = strength; pose = pose || "punch";
+      if (pose === "spin") {
+        // ブォン…と回るような風切り
+        tone("sine", 240, 90, 0.24, 0.14);
+        crack(0.18, 0.2, 800, 2800);
+      } else if (pose === "kick" || pose === "jumpkick") {
+        // ヒュッ（重め・大振り）
+        crack(0.17, 0.22 + 0.05 * s, 1000, 3800);
+        tone("sine", 320, 110, 0.16, 0.1);
+      } else {
+        // シュッ（鋭い）
+        crack(0.11 + 0.03 * s, 0.18 + 0.05 * s, 1400, 4400 + 800 * s);
+      }
     },
-    hit(strength) {
+    hit(strength, pose) {
       ensure();
-      const s = strength; // 0=軽い / 1=重い
-      // ドスッ：当たった衝撃の芯（パンチの効いた低中音ボディ）
-      thump(205 + 50 * s, 58, 0.17 + 0.06 * s, 0.68 + 0.16 * s);
-      // バキッ：肉・骨に効く中音の歪んだ衝撃（“当てた感”の主役）
-      crunch(0.1 + 0.03 * s, 0.56 + 0.18 * s, 2400 + 300 * s, 650, 13 + 9 * s);
-      // ゴッ：当たりに厚みを出す中低音スナップ
-      tone("square", 190 + 40 * s, 70, 0.09 + 0.02 * s, 0.33);
-      // パツッ：当たりの輪郭（弱パンチはシャリつかせず、強打ほど明るく）
-      crack(0.026, 0.07 + 0.14 * s, 3000 + 1800 * s, 1700);
-      // 重い一撃：さらに重い追い打ち “ドガッ”
-      if (s) { thump(115, 46, 0.24, 0.48); crunch(0.07, 0.34, 1500, 480, 16); }
+      const s = strength; pose = pose || "punch"; // 0=軽い / 1=重い
+      // === 共通：当たりの芯＋サブブームで“大袈裟”な土台 ===
+      thump(215 + 50 * s, 50, 0.22 + 0.08 * s, 0.82 + 0.18 * s);   // ドスッ（強化）
+      thump(68, 32, 0.42 + 0.1 * s, 0.5 + 0.12 * s);               // ドゥーン（サブブーム）
+      crunch(0.1 + 0.04 * s, 0.6 + 0.2 * s, 2600 + 300 * s, 600, 14 + 9 * s); // バキッ
+      // === 技ごとの味付け ===
+      if (pose === "punch") {
+        // バキィン：金属的な鋭いリングで派手に
+        tone("square", 360 + 80 * s, 90, 0.08, 0.34);
+        tone("triangle", 1500 + 200 * s, 720, 0.2 + 0.05 * s, 0.18);   // キラッと余韻
+        crack(0.03, 0.12 + 0.12 * s, 3600, 1800);
+      } else if (pose === "kick" || pose === "jumpkick") {
+        // ドガァン：重い低音＋落ちるスイープ
+        tone("sawtooth", 260, 60, 0.24 + 0.06 * s, 0.32);
+        thump(120, 38, 0.32, 0.42);
+        crack(0.04, 0.14 + 0.12 * s, 3000, 1500);
+      } else if (pose === "spin") {
+        // ガガガッ→ドバァン：連続衝撃で乱舞感
+        tone("sawtooth", 520, 130, 0.32, 0.22);                       // 唸る回転音
+        setTimeout(() => { if (ac) crunch(0.05, 0.45, 2200, 700, 18); }, 45);
+        setTimeout(() => { if (ac) { crunch(0.08, 0.55, 2400, 600, 18); thump(150, 44, 0.28, 0.55); } }, 95);
+      } else {
+        // push 等：唸る一撃
+        tone("sawtooth", 180, 540, 0.24, 0.3);
+      }
+      // 重い一撃：全体にさらに追い打ち “ドガッ”
+      if (s) { thump(112, 40, 0.32, 0.52); crunch(0.08, 0.42, 1500, 480, 18); }
     },
     block() { ensure(); noise(0.09, 0.4, 6000, 2500); tone("triangle", 700, 400, 0.08, 0.15); },
     special() {
@@ -288,7 +315,6 @@ const Input = (() => {
     if (code === "ArrowUp" || code === "ArrowDown") { menuNav = code === "ArrowUp" ? -1 : 1; e.preventDefault(); return; }
     if (key === "1") { digitPick = 0; e.preventDefault(); return; }
     if (key === "2") { digitPick = 1; e.preventDefault(); return; }
-    if (key === "3") { digitPick = 2; e.preventDefault(); return; }
 
     if (mode === "online") {
       // 移動：←→ / A D どちらでもOK（ローカルは1人なので寛容に）
@@ -491,7 +517,7 @@ class Fighter {
     this.hasHit = false;
     if (kind === "ultimate") { Audio_.charge(); }
     else if (kind === "special") Audio_.special();
-    else Audio_.whiff(move.dmg > 9 ? 1 : 0);
+    else Audio_.whiff(move.dmg > 9 ? 1 : 0, move.pose);
   }
 
   takeHit(move, fromDir, game) {
@@ -519,7 +545,7 @@ class Fighter {
     this.flash = 0.2;
     this.meter = Math.min(MAX_METER, this.meter + Math.round(dmg * 0.6));
     const hx = this.x + fromDir * 24, hy = this.y - 112 + this.airY;
-    Audio_.hit(dmg > 12 ? 1 : 0);
+    Audio_.hit(dmg > 12 ? 1 : 0, move.pose);
 
     // ===== 手応えの可視化（数字・コンボ・コール） =====
     const atkIdx = (this === game.p1) ? 1 : 0;     // 攻撃側
@@ -1683,7 +1709,7 @@ class Game {
       skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } });
     this.ai = { timer: 0, action: "idle", moveDir: 0, level: 1 };
     this.mode = "cpu";           // cpu = 対CPU / vs = ローカル2人 / vs+online = オンライン
-    this.menuIndex = 0;          // タイトルの選択（0=CPU / 1=ローカル2人 / 2=オンライン）
+    this.menuIndex = 0;          // タイトルの選択（0=CPU / 1=オンライン）
     this.online = false;         // オンライン対戦中か
     this.netRole = null;         // 'host'(=1P) / 'guest'(=2P)
     this._oi1 = { move: 0, attack: false };  // オンライン適用入力（P1/P2）
@@ -1731,7 +1757,7 @@ class Game {
   // オンライン対戦の終了 → タイトルへ
   endOnline() {
     this.online = false; this.netRole = null;
-    this.state = "title"; this.menuIndex = 2;
+    this.state = "title"; this.menuIndex = 1;
     Audio_.stopBGM();
   }
   // Net が各フレーム適用する入力（P1=host側 / P2=guest側）
@@ -1746,7 +1772,6 @@ class Game {
   // タイトルメニューの決定
   confirmMenu() {
     if (this.menuIndex === 0) { this.mode = "cpu"; this.online = false; this.startMatch(); }
-    else if (this.menuIndex === 1) { this.mode = "vs"; this.online = false; this.startMatch(); }
     else { this.online = true; openLobby(); }   // オンライン：ロビーを開く
   }
   startRound() {
@@ -1868,7 +1893,7 @@ class Game {
     // タイトル：↑↓でモード選択 / 1・2・3で直接選択 / Enterで決定
     if (this.state === "title") {
       const nav = Input.consumeNav();
-      if (nav) this.menuIndex = (this.menuIndex + nav + 3) % 3;
+      if (nav) this.menuIndex = (this.menuIndex + nav + 2) % 2;
       const d = Input.consumeDigit();
       if (d >= 0) { this.menuIndex = d; this.confirmMenu(); return; }
       if (Input.consumeEnter()) { this.confirmMenu(); }
