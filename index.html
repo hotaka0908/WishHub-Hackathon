@@ -1,0 +1,1620 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NEON FIST — 2D Fighting</title>
+<style>
+  :root { --bg:#05060d; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html,body { width:100%; height:100%; background:var(--bg); overflow:hidden;
+    font-family:"Segoe UI", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif; }
+  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 30%, #14182c 0%, #05060d 70%); }
+  canvas { display:block; image-rendering:auto;
+    box-shadow:0 0 60px rgba(80,120,255,.25), 0 0 0 2px rgba(120,160,255,.15);
+    border-radius:6px; background:#000; }
+  #hint { position:fixed; bottom:8px; left:0; right:0; text-align:center; color:#7e87b5;
+    font-size:12px; letter-spacing:.5px; pointer-events:none; user-select:none; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div><script>
+"use strict";
+/* =====================================================================
+   NEON FIST — 対CPU 2D格闘ゲーム  (single-file, no assets)
+   描画: Canvas2D 関節アニメ / 音: Web Audio 合成
+   ===================================================================== */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const W = canvas.width, H = canvas.height;
+const GROUND_Y = H - 96;          // 地面の高さ(キャラの足元)
+const FLOOR_MIN = 70, FLOOR_MAX = W - 70;
+
+/* ----- 画面フィット（アスペクト維持） ----- */
+function fit() {
+  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width = (W * s) + "px";
+  canvas.style.height = (H * s) + "px";
+}
+window.addEventListener("resize", fit); fit();
+
+/* =====================================================================
+   AUDIO ENGINE  — Web Audio 合成
+   ===================================================================== */
+const Audio_ = (() => {
+  let ac = null, master = null, noiseBuf = null, bgmTimer = null, bgmStep = 0, musicGain = null;
+  function ensure() {
+    if (ac) return;
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    master = ac.createGain(); master.gain.value = 0.9; master.connect(ac.destination);
+    musicGain = ac.createGain(); musicGain.gain.value = 0.16; musicGain.connect(master);
+    // ノイズバッファ
+    const len = ac.sampleRate * 1.0;
+    noiseBuf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function resume() { ensure(); if (ac.state === "suspended") ac.resume(); }
+  function now() { return ac.currentTime; }
+
+  function noise(dur, vol, lpStart, lpEnd, dest) {
+    const src = ac.createBufferSource(); src.buffer = noiseBuf;
+    const g = ac.createGain(); const lp = ac.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(lpStart, now());
+    lp.frequency.exponentialRampToValueAtTime(Math.max(60, lpEnd), now() + dur);
+    g.gain.setValueAtTime(vol, now());
+    g.gain.exponentialRampToValueAtTime(0.0008, now() + dur);
+    src.connect(lp); lp.connect(g); g.connect(dest || master);
+    src.start(); src.stop(now() + dur + 0.02);
+  }
+  function tone(type, f0, f1, dur, vol, dest) {
+    const o = ac.createOscillator(); const g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f0, now());
+    if (f1 && f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(20, f1), now() + dur);
+    g.gain.setValueAtTime(0.0001, now());
+    g.gain.exponentialRampToValueAtTime(vol, now() + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0008, now() + dur);
+    o.connect(g); g.connect(dest || master);
+    o.start(); o.stop(now() + dur + 0.02);
+  }
+
+  const api = {
+    resume,
+    whiff(strength) { ensure(); noise(0.12 + 0.05 * strength, 0.18, 1600 + 400 * strength, 300); },
+    hit(strength) {
+      ensure();
+      noise(0.09 + 0.04 * strength, 0.5, 3500, 500);
+      tone("square", 120 + 30 * strength, 50, 0.12 + 0.04 * strength, 0.28);
+    },
+    block() { ensure(); noise(0.09, 0.4, 6000, 2500); tone("triangle", 700, 400, 0.08, 0.15); },
+    special() {
+      ensure();
+      tone("sawtooth", 180, 520, 0.22, 0.25);
+      noise(0.2, 0.35, 4000, 600);
+      tone("square", 90, 70, 0.3, 0.25);
+    },
+    charge() { ensure(); tone("sawtooth", 80, 240, 0.5, 0.16); },
+    ultimate() {
+      ensure();
+      tone("sawtooth", 120, 900, 0.5, 0.3);
+      tone("square", 240, 1800, 0.5, 0.18);
+      noise(0.5, 0.45, 5000, 400);
+      setTimeout(() => { tone("sawtooth", 700, 90, 0.4, 0.3); }, 120);
+    },
+    fire() { ensure(); tone("sine", 600, 160, 0.3, 0.22); noise(0.18, 0.2, 2200, 400); },
+    ko() {
+      ensure();
+      tone("sawtooth", 400, 60, 0.7, 0.35);
+      noise(0.6, 0.4, 3000, 200);
+      setTimeout(() => tone("square", 300, 50, 0.5, 0.25), 100);
+    },
+    round() { ensure(); tone("square", 520, 520, 0.12, 0.2); setTimeout(() => tone("square", 780, 780, 0.18, 0.22), 130); },
+    startBGM() {
+      ensure(); if (bgmTimer) return;
+      const root = 55; // A1
+      const bass = [0, 0, 7, 5, 0, 0, 10, 7];
+      const arp = [0, 7, 12, 7, 3, 10, 15, 10];
+      const stepDur = 0.18;
+      bgmStep = 0;
+      bgmTimer = setInterval(() => {
+        if (!ac) return;
+        const i = bgmStep % 8;
+        const bf = root * Math.pow(2, bass[i] / 12);
+        tone("triangle", bf, bf, stepDur * 0.9, 0.5, musicGain);
+        if (bgmStep % 2 === 0) {
+          const af = root * 4 * Math.pow(2, arp[i] / 12);
+          tone("square", af, af, stepDur * 0.7, 0.18, musicGain);
+        }
+        if (i % 4 === 0) noise(0.05, 0.3, 8000, 4000, musicGain); // hat
+        bgmStep++;
+      }, stepDur * 1000);
+    },
+    stopBGM() { if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; } }
+  };
+  return api;
+})();
+
+/* =====================================================================
+   INPUT — tap / double-tap / hold 判定
+   ===================================================================== */
+const Input = (() => {
+  const DOUBLE = 220, HOLD = 340;
+  const keys = {};                 // 押下状態
+  const ks = {};                   // 文字キーごとの状態
+  const queue = [];                // プレイヤーの攻撃イベント
+  let enterPressed = false;
+
+  function group(k) {
+    const i = k.charCodeAt(0) - 97;            // a=0
+    if (i < 5) return 0; if (i < 10) return 1; if (i < 15) return 2; if (i < 20) return 3; return 4;
+  }
+
+  window.addEventListener("keydown", (e) => {
+    Audio_.resume();
+    const key = e.key;
+    if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = true; e.preventDefault(); return; }
+    if (key === "Enter") { enterPressed = true; e.preventDefault(); return; }
+    if (/^[a-zA-Z]$/.test(key)) {
+      const k = key.toLowerCase();
+      e.preventDefault();
+      if (e.repeat) return;
+      let s = ks[k] || (ks[k] = {});
+      if (s.pendingNormal) {                 // 2回目押下 → 特別技
+        clearTimeout(s.pendingNormal); s.pendingNormal = null; s.awaitingDouble = true;
+      } else s.awaitingDouble = false;
+      s.down = true; s.pressTime = performance.now(); s.holdFired = false; s.charged = false;
+    }
+  });
+  window.addEventListener("keyup", (e) => {
+    const key = e.key;
+    if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = false; return; }
+    if (/^[a-zA-Z]$/.test(key)) {
+      const k = key.toLowerCase(); const s = ks[k]; if (!s) return;
+      s.down = false;
+      if (s.holdFired) return;                // 必殺技は発動済み
+      if (s.awaitingDouble) { queue.push({ kind: "special", g: group(k) }); s.awaitingDouble = false; return; }
+      s.pendingNormal = setTimeout(() => {     // 一定時間2回目が来なければ通常技
+        queue.push({ kind: "normal", g: group(k) }); s.pendingNormal = null;
+      }, DOUBLE);
+    }
+  });
+  window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
+
+  function update() {
+    const t = performance.now();
+    for (const k in ks) {
+      const s = ks[k];
+      if (s.down && !s.holdFired) {
+        const held = t - s.pressTime;
+        if (!s.charged && held > HOLD * 0.45) { s.charged = true; Audio_.charge(); }
+        if (held >= HOLD) { s.holdFired = true; queue.push({ kind: "ultimate", g: group(k) }); }
+      }
+    }
+  }
+  function moveDir() { return (keys["ArrowRight"] ? 1 : 0) - (keys["ArrowLeft"] ? 1 : 0); }
+  function anyKeyCharging() { for (const k in ks) if (ks[k].down && ks[k].charged && !ks[k].holdFired) return true; return false; }
+  function takeEvents() { const q = queue.slice(); queue.length = 0; return q; }
+  function consumeEnter() { const v = enterPressed; enterPressed = false; return v; }
+  return { update, moveDir, takeEvents, consumeEnter, anyKeyCharging };
+})();
+
+/* =====================================================================
+   MOVE DATA — 5種通常技 / 特別技 / 必殺技
+   ===================================================================== */
+// アルファベットを押すたびに、この5種を順番にループする
+const NORMALS = [
+  { name: "弱パンチ",           pose: "punch",    arm: "front", dur: .28, hs: .06, he: .14, dmg: 6,  reach: 96,  kb: 130, up: 0,   meter: 6 },
+  { name: "強パンチ",           pose: "punch",    arm: "back",  dur: .46, hs: .15, he: .25, dmg: 11, reach: 110, kb: 240, up: 0,   meter: 9 },
+  { name: "ジャンプキック",     pose: "jumpkick", arm: "front", dur: .58, hs: .20, he: .36, dmg: 13, reach: 122, kb: 250, up: -80, meter: 11, hop: 130 },
+  { name: "ダイナミックキック", pose: "kick",     arm: "back",  dur: .58, hs: .20, he: .34, dmg: 15, reach: 134, kb: 300, up: -60, meter: 12 },
+  { name: "大車輪パンチ",       pose: "spin",     arm: "front", dur: .62, hs: .24, he: .42, dmg: 14, reach: 114, kb: 300, up: 0,   meter: 12 },
+];
+// 同じ位置の強化版（2回押し=特別技 / ゲージ不足の必殺技代替）
+const SPECIALS = [
+  { name: "連打突き",       pose: "punch",    arm: "front", dur: .50, hs: .12, he: .30, dmg: 16, reach: 132, kb: 320, up: 0,    meter: 14, lunge: 240 },
+  { name: "豪打",           pose: "punch",    arm: "back",  dur: .60, hs: .18, he: .34, dmg: 20, reach: 144, kb: 430, up: -60,  meter: 16, lunge: 200 },
+  { name: "流星脚",         pose: "jumpkick", arm: "front", dur: .64, hs: .20, he: .42, dmg: 19, reach: 152, kb: 380, up: -240, meter: 15, lunge: 220, hop: 180 },
+  { name: "竜巻脚",         pose: "kick",     arm: "back",  dur: .60, hs: .16, he: .42, dmg: 20, reach: 156, kb: 380, up: -160, meter: 15, lunge: 230 },
+  { name: "大車輪・乱舞",   pose: "spin",     arm: "front", dur: .68, hs: .22, he: .48, dmg: 18, reach: 132, kb: 360, up: 0,    meter: 16, lunge: 180 },
+];
+const ULTIMATE = { name: "波動・烈", pose: "push", dur: .70, hs: .26, he: .34, projectile: true, dmg: 26, cost: 50 };
+const MAX_METER = 100;
+
+/* =====================================================================
+   POSE — 関節アニメ用のポーズ定義（角度: 0=真下, +で前方向）
+   ===================================================================== */
+function basePose() {
+  return {
+    hipH: 96, lean: 0.06, crouch: 0,
+    bSh: 1.15, bEl: 2.25,   // 奥腕(上腕,前腕)
+    fSh: 1.05, fEl: 2.05,   // 手前腕
+    bHip: -0.32, bKnee: -0.12,
+    fHip: 0.40, fKnee: 0.18,
+  };
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
+function blendPose(p, t, tgt) {
+  const o = {};
+  for (const k in p) o[k] = (k in tgt) ? lerp(p[k], tgt[k], t) : p[k];
+  return o;
+}
+// 完全なポーズを作る / 2ポーズ間を補間
+function fullPose(ov) { return Object.assign(basePose(), ov); }
+function mixPose(a, b, t) {
+  const o = {};
+  for (const k in a) { const bv = (b[k] !== undefined) ? b[k] : a[k]; o[k] = a[k] + (bv - a[k]) * t; }
+  return o;
+}
+// 各技の「タメ(windup)」と「振り抜き(strike)」キーフレーム（大袈裟に）
+function moveKeyframes(move) {
+  const front = move.arm !== "back";
+  if (move.pose === "punch") {
+    return front ? {
+      windup: { fSh: 0.30, fEl: 0.05, bSh: 1.25, bEl: 1.75, lean: -0.34, hipH: 86, bHip: -0.45, fHip: 0.55 },
+      strike: { fSh: 1.62, fEl: 1.60, bSh: 0.10, bEl: 0.05, lean: 0.66, hipH: 98, bHip: -0.6, fHip: 0.78, fKnee: 0.5 },
+    } : {
+      windup: { bSh: 0.15, bEl: -0.15, fSh: 1.25, fEl: 1.75, lean: -0.48, hipH: 84, bHip: -0.55 },
+      strike: { bSh: 1.62, bEl: 1.62, fSh: 0.08, fEl: 0.0, lean: 0.74, hipH: 98, bHip: -0.65, fHip: 0.82, fKnee: 0.45 },
+    };
+  }
+  if (move.pose === "kick") {
+    return front ? { // 前蹴り：膝を抱えて一気に突き出す
+      windup: { fHip: 0.75, fKnee: -1.05, lean: -0.28, bKnee: -0.1, fSh: 0.5, bSh: 0.75, hipH: 92 },
+      strike: { fHip: 1.55, fKnee: 1.62, lean: -0.55, bKnee: -0.05, fSh: -0.25, bSh: 0.35, hipH: 86 },
+    } : { // ハイキック：大きく振り回す
+      windup: { bHip: -0.75, bKnee: -1.05, lean: -0.32, fKnee: 0.2, fSh: 0.6, bSh: 0.6, hipH: 84 },
+      strike: { bHip: 1.72, bKnee: 1.55, lean: -0.72, fKnee: 0.55, fSh: -0.35, bSh: 0.3, hipH: 82 },
+    };
+  }
+  if (move.pose === "jumpkick") { // 跳び蹴り：両脚を畳んで跳び、前脚を突き出す
+    return {
+      windup: { fHip: 0.55, fKnee: -1.1, bHip: -0.4, bKnee: -1.1, lean: 0.05, fSh: 0.55, bSh: 0.6, fEl: 1.8, bEl: 1.8, hipH: 98 },
+      strike: { fHip: 1.45, fKnee: 1.6, bHip: -0.15, bKnee: -0.9, lean: -0.08, fSh: -0.25, bSh: 0.6, fEl: 1.4, hipH: 98 },
+    };
+  }
+  if (move.pose === "spin") { // 両手を大きく振り回して叩きつける
+    return {
+      windup: { fSh: 3.35, fEl: 3.5, bSh: 3.35, bEl: 3.5, lean: -0.36, hipH: 92, fHip: 0.5, bHip: -0.45 },
+      strike: { fSh: 1.5, fEl: 1.55, bSh: 1.45, bEl: 1.5, lean: 0.64, hipH: 96, fHip: 0.72, bHip: -0.55, fKnee: 0.4 },
+    };
+  }
+  if (move.pose === "upper") { // 昇龍：深くしゃがんで爆発的に立ち上がる
+    return {
+      windup: { fSh: 0.25, fEl: 0.15, bSh: 0.9, bEl: 1.6, lean: 0.08, hipH: 64, bHip: 0.35, fHip: 0.6, bKnee: 0.65, fKnee: 0.65 },
+      strike: { fSh: 2.72, fEl: 3.05, bSh: 1.25, bEl: 1.95, lean: 0.16, hipH: 122, bHip: -0.2, fHip: 0.22, bKnee: 0.0, fKnee: 0.0 },
+    };
+  }
+  // push (ultimate)：両手を引き絞って前へ突き出す
+  return {
+    windup: { fSh: 0.4, fEl: 0.2, bSh: 0.4, bEl: 0.2, lean: -0.38, hipH: 80, bHip: -0.5, fHip: 0.62 },
+    strike: { fSh: 1.5, fEl: 1.5, bSh: 1.5, bEl: 1.5, lean: 0.52, hipH: 100, bHip: -0.55, fHip: 0.72 },
+  };
+}
+
+/* =====================================================================
+   FIGHTER
+   ===================================================================== */
+class Fighter {
+  constructor(opts) {
+    this.name = opts.name;
+    this.isCPU = !!opts.isCPU;
+    this.colors = opts.colors;
+    this.startX = opts.x;
+    this.comboIndex = 0;   // 攻撃ループ位置：被弾やラウンド交代では保持し、試合開始でのみ0に戻す
+    this.reset(opts.facing);
+  }
+  reset(facing) {
+    this.x = this.startX; this.y = GROUND_Y;
+    this.vx = 0; this.facing = facing;
+    this.hp = 100; this.maxHp = 100;
+    this.meter = 0;
+    this.state = "idle";            // idle/walk/attack/hit/block/ko
+    this.attack = null;             // {move,kind,t}
+    this.hasHit = false;
+    this.hitstun = 0; this.blockstun = 0;
+    this.flash = 0; this.koTimer = 0;
+    this.airY = 0; this.airVY = 0;  // 打ち上げ用の縦オフセット
+    this.tumble = 0; this.tumbleV = 0; this.tumbleTarget = 0; // 吹っ飛び回転
+    this.prone = false; this.bounced = false; this.downTimer = 0; // ダウン
+    this.blocking = false; this.cmdDir = 0;
+    this.trail = [];
+    this.buffer = null; this.bufferT = 0;
+    this.walkPhase = 0; this.clock = Math.random() * 10;
+  }
+  get airborne() { return this.airY < -1; }
+  canAct() { return this.state !== "ko" && this.state !== "knockdown" && this.hitstun <= 0 && this.blockstun <= 0 && this.state !== "attack" && !this.airborne; }
+
+  request(kind, g) {
+    if (this.state === "ko") return;
+    if (!this.canAct()) { this.buffer = { kind, g }; this.bufferT = 0.16; return; }
+    this._start(kind, g);
+  }
+  _start(kind, g) {
+    let move;
+    const ci = this.comboIndex % NORMALS.length;   // 押すたびにループする現在位置
+    if (kind === "ultimate") {
+      if (this.meter < ULTIMATE.cost) { // ゲージ不足 → 強攻撃で代替
+        move = SPECIALS[ci]; kind = "special";
+      } else { this.meter -= ULTIMATE.cost; move = ULTIMATE; }
+    } else if (kind === "special") move = SPECIALS[ci];
+    else { move = NORMALS[ci]; this.comboIndex++; }   // 通常攻撃だけがループを進める
+
+    this.state = "attack";
+    this.attack = { move, kind, t: 0, fired: false };
+    this.hasHit = false;
+    if (kind === "ultimate") { Audio_.charge(); }
+    else if (kind === "special") Audio_.special();
+    else Audio_.whiff(move.dmg > 9 ? 1 : 0);
+  }
+
+  takeHit(move, fromDir, game) {
+    if (this.state === "ko" || this.state === "knockdown") return;  // ダウン中は追撃を受けない
+    const dmg = move.dmg, isUlt = !!move.projectile;
+    if (this.blocking && !isUlt) {
+      const chip = Math.max(1, Math.round(dmg * 0.18));
+      this.hp -= chip; this.blockstun = 0.22; this.vx += fromDir * 120;
+      this.meter = Math.min(MAX_METER, this.meter + 4);
+      Audio_.block(); game.fx.spark(this.x, this.y - 110, fromDir, "#bcd6ff", 8);
+      if (this.hp <= 0) this._ko(game, fromDir, false);
+      return;
+    }
+    this.hp -= dmg;
+    this.attack = null;
+    this.flash = 0.2;
+    this.meter = Math.min(MAX_METER, this.meter + Math.round(dmg * 0.6));
+    const hx = this.x + fromDir * 24, hy = this.y - 112 + this.airY;
+    Audio_.hit(dmg > 12 ? 1 : 0);
+
+    // この攻撃でダウンするか？（キック・特別技・必殺技・打ち上げ技）
+    const knockdown = isUlt || !!move.lunge || !!move.up || dmg >= 13;
+    const fatal = this.hp <= 0;
+
+    if (isUlt) {
+      // ===== 必殺技ヒット：超派手演出 =====
+      game.hitstop = Math.max(game.hitstop, 0.2);
+      game.slow = Math.max(game.slow, 0.55);
+      game.shake = Math.max(game.shake, 30);
+      game.flash = 0.36; game.flashMax = 0.36; game.flashColor = "#eaf6ff";
+      game.fx.burst(hx, hy, "#baf0ff");
+      game.fx.speedlines(hx, hy, "#ffffff");
+      game.fx.shock(hx, hy, "#7fd6ff");
+      game.fx.ring(hx, hy, "#ffffff");
+      game.fx.blast(hx, hy, "#cde0ff", 40, 1.5);
+      game.fx.blast(hx, hy, "#ffd36b", 22, 1.1);
+    } else if (knockdown) {
+      // ===== 大技ヒット：しっかりした手応え =====
+      game.hitstop = Math.max(game.hitstop, 0.12);
+      game.slow = Math.max(game.slow, 0.12);
+      game.shake = Math.max(game.shake, Math.min(24, 10 + dmg));
+      game.fx.burst(hx, hy, "#fff2b0");
+      game.fx.ring(hx, hy, "#fff2b0");
+      game.fx.blast(hx, hy, "#ffd36b", 20, 1);
+    } else {
+      // ===== 軽い打撃：のけぞり =====
+      game.hitstop = Math.max(game.hitstop, 0.06);
+      game.shake = Math.max(game.shake, 7 + dmg * 0.6);
+      game.fx.spark(hx, hy, fromDir, "#ffd36b", 12 + dmg);
+      game.fx.ring(hx, hy, "#fff2b0");
+    }
+
+    if (fatal) { this._ko(game, fromDir, isUlt); return; }
+
+    if (knockdown) {
+      // 回転しながら吹っ飛ぶ
+      this.state = "knockdown"; this.prone = false; this.bounced = false;
+      this.hitstun = 999; this.downTimer = 0.75;
+      const p = isUlt ? 1.0 : 0.6;
+      this.vx = fromDir * (isUlt ? 880 : 320 + dmg * 12);
+      this.airVY = -(isUlt ? 560 : 320 + dmg * 7);
+      this.tumbleV = fromDir * (isUlt ? 15 : 8 + dmg * 0.2);
+    } else {
+      // のけぞりのみ
+      this.state = "hit";
+      this.hitstun = 0.26 + dmg * 0.012;
+      this.vx += fromDir * move.kb;
+      if (move.up) this.airVY = move.up;
+    }
+  }
+  _ko(game, fromDir, big) {
+    this.hp = 0; this.state = "ko"; this.koTimer = 0;
+    fromDir = fromDir || this.facing * -1;
+    // 派手にぶっ飛ばしてからダウン
+    this.vx = fromDir * (big ? 760 : 300);
+    this.airVY = big ? -480 : -300;
+    this.tumbleV = fromDir * (big ? 13 : 7);
+    Audio_.ko(); game.onKO(this);
+  }
+
+  update(dt, opp, game) {
+    this.clock += dt;
+    if (this.flash > 0) this.flash -= dt;
+    if (this.bufferT > 0) { this.bufferT -= dt; if (this.bufferT <= 0) this.buffer = null; }
+
+    // --- 吹っ飛び / 打ち上げ / ダウン / KO 物理 ---
+    const downed = this.state === "knockdown" || this.state === "ko";
+    if (downed) {
+      if (!this.prone) {
+        this.airVY += 1500 * dt;
+        this.airY += this.airVY * dt;
+        this.tumble += this.tumbleV * dt;
+        this.vx *= Math.pow(0.3, dt);
+        // 壁でバウンド
+        if ((this.x <= FLOOR_MIN + 1 && this.vx < 0) || (this.x >= FLOOR_MAX - 1 && this.vx > 0)) {
+          this.vx *= -0.45; this.tumbleV *= -0.6;
+          game.shake = Math.max(game.shake, 12);
+          game.fx.blast(this.x, this.y - 70 + this.airY, "#ffd9a0", 14, 0.9);
+        }
+        if (this.airY >= 0) {
+          this.airY = 0;
+          if (!this.bounced && this.airVY > 320) {       // 地面で1回バウンド
+            this.bounced = true; this.airVY = -this.airVY * 0.5; this.vx *= 0.55;
+            game.shake = Math.max(game.shake, 9);
+            game.fx.blast(this.x, this.y, "#c9b79a", 16, 0.8);
+            game.fx.ring(this.x, this.y - 6, "#e9dcc0");
+          } else {                                       // 着地してダウン
+            this.airVY = 0; this.prone = true; this.tumbleV = 0;
+            this.tumbleTarget = (this.vx >= 0 ? 1 : -1) * 1.45;
+            game.fx.spark(this.x, this.y, 1, "#b7a98c", 10);
+          }
+        }
+      } else {
+        this.tumble += (this.tumbleTarget - this.tumble) * Math.min(1, dt * 12);
+        this.vx *= Math.pow(0.02, dt);
+        if (this.state === "knockdown") {
+          this.downTimer -= dt;
+          if (this.downTimer <= 0) {                     // 起き上がる
+            this.state = "idle"; this.prone = false; this.bounced = false;
+            this.hitstun = 0; this.tumble = 0; this.tumbleV = 0;
+          }
+        }
+      }
+    } else if (this.airborne || this.airVY < 0) {
+      this.airVY += 1100 * dt; this.airY += this.airVY * dt;
+      if (this.airY >= 0) { this.airY = 0; this.airVY = 0; if (this.state === "hit") this.hitstun = Math.min(this.hitstun, 0.12); }
+    }
+
+    if (this.hitstun > 0 && this.state !== "knockdown") this.hitstun -= dt;
+    if (this.blockstun > 0) this.blockstun -= dt;
+    if (this.state === "hit" && this.hitstun <= 0 && !this.airborne) this.state = "idle";
+    if (this.state === "block" && this.blockstun <= 0) this.state = "idle";
+
+    // 攻撃進行
+    if (this.state === "attack" && this.attack) {
+      const a = this.attack, m = a.move;
+      a.t += dt;
+      // 打点で前へ踏み込む（攻撃に体重を乗せる）
+      if (!a.stepped && a.t >= m.hs) {
+        a.stepped = true;
+        const st = m.lunge ? m.lunge : Math.min(230, 90 + m.dmg * 9);
+        this.vx += st * this.facing;
+        if (m.dmg >= 14 || m.lunge) game.shake = Math.max(game.shake, 4);
+      }
+      // 必殺技の発射
+      if (m.projectile && !a.fired && a.t >= m.hs) {
+        a.fired = true;
+        Audio_.ultimate();
+        game.spawnProjectile(this);
+        game.shake = Math.max(game.shake, 8);
+      }
+      if (a.t >= m.dur) { this.state = "idle"; this.attack = null; }
+    }
+
+    // 向き（行動可能時のみ相手の方へ）
+    if (this.canAct()) {
+      const d = opp.x - this.x; if (Math.abs(d) > 6) this.facing = d > 0 ? 1 : -1;
+    }
+
+    // 入力バッファ消化
+    if (this.buffer && this.canAct()) { const b = this.buffer; this.buffer = null; this._start(b.kind, b.g); }
+
+    // 移動意図 & ガード（blocking は checkCombat まで保持する）
+    this.blocking = false;
+    const cmd = this.cmdDir || 0;
+    if (this.canAct()) {
+      if (this.state === "walk" || this.state === "block") this.state = "idle";
+      const toOpp = Math.sign(opp.x - this.x) || 1;
+      if (cmd !== 0) {
+        if (cmd === -toOpp && opp.state === "attack") { this.blocking = true; this.state = "block"; }
+        else { this.vx = cmd * 280; this.state = "walk"; this.walkPhase += 0.3; }
+      }
+    }
+    this.cmdDir = 0;
+
+    // 摩擦・移動（吹っ飛び中は専用減衰を使うのでスキップ）
+    if (!downed) {
+      this.vx *= Math.pow(0.0008, dt);
+      if (Math.abs(this.vx) < 4) this.vx = 0;
+    }
+    this.x += this.vx * dt;
+    this.x = Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, this.x));
+  }
+
+  // プレイヤー/AIから呼ぶ移動コマンド（意図だけ記録、処理は update 内）
+  walk(dir) { this.cmdDir = dir; }
+
+  /* ---------- 描画 ---------- */
+  getReachBox() {
+    if (this.state !== "attack" || !this.attack) return null;
+    const a = this.attack, m = a.move;
+    if (m.projectile) return null;
+    if (a.t < m.hs || a.t > m.he) return null;
+    const cx = this.x + this.facing * (m.reach * 0.55);
+    const cy = this.y - 112 + (m.up < -100 ? -50 : 0) - (-this.airY);
+    const w = m.reach, h = 96;
+    return { x: cx - w / 2, y: cy - h / 2, w, h, dir: this.facing, move: m };
+  }
+  hurtBox() {
+    const top = this.y - 176 - (-this.airY);
+    return { x: this.x - 34, y: top, w: 68, h: 176 };
+  }
+
+  currentPose() {
+    let p = basePose();
+    // 呼吸 / 歩行の上下動
+    const breathe = Math.sin(this.clock * 2.2) * 2;
+    p.hipH += breathe;
+    if (this.state === "walk") p.hipH += Math.abs(Math.sin(this.walkPhase)) * 6;
+    if (this.state === "block") { p = blendPose(p, 1, { fSh: 1.3, fEl: 2.7, bSh: 1.25, bEl: 2.6, lean: -0.25, hipH: 86 }); }
+    if (this.state === "hit") { p = blendPose(p, 0.6, { lean: -0.5, fSh: 0.4, bSh: 0.4, hipH: 90 }); }
+    if (this.state === "knockdown" || this.state === "ko") {
+      // 吹っ飛び中は手足を投げ出し、ダウン後は伸びる（回転は draw 側で付与）
+      p = this.prone
+        ? blendPose(p, 1, { hipH: 96, lean: 0, bHip: 0.1, fHip: -0.1, bKnee: 0.1, fKnee: -0.1, bSh: 0.5, fSh: -0.4, bEl: 0.4, fEl: -0.3 })
+        : blendPose(p, 0.8, { hipH: 92, lean: -0.2, bHip: 0.5, fHip: -0.4, bKnee: 0.3, fKnee: -0.3, bSh: -0.5, fSh: 0.6 });
+    }
+    if (this.state === "attack" && this.attack) {
+      const a = this.attack, m = a.move, tn = a.t;
+      const kf = moveKeyframes(m);
+      const wind = fullPose(kf.windup), strike = fullPose(kf.strike);
+      if (tn < m.hs) {
+        // タメ（予備動作）：ゆっくり引く
+        const k = m.hs > 0 ? tn / m.hs : 1;
+        p = mixPose(p, wind, k * (2 - k));               // easeOut
+      } else if (tn <= m.he) {
+        // 振り抜き：一気にスナップして伸び切る
+        const k = (tn - m.hs) / Math.max(0.001, m.he - m.hs);
+        const e = 1 - Math.pow(1 - k, 3);                // easeOutCubic（速い立ち上がり）
+        p = mixPose(wind, strike, e);
+      } else {
+        // 戻り
+        const k = (tn - m.he) / Math.max(0.001, m.dur - m.he);
+        p = mixPose(strike, p, k * k);                   // easeIn
+      }
+    }
+    return p;
+  }
+
+  draw(ctx) {
+    const p = this.currentPose();
+    const f = this.facing;
+    // ジャンプ攻撃の跳び上がりアーク（見た目のみ）
+    let hop = 0;
+    if (this.state === "attack" && this.attack && this.attack.move.hop) {
+      const m = this.attack.move, pr = Math.max(0, Math.min(1, this.attack.t / m.dur));
+      hop = -Math.sin(pr * Math.PI) * m.hop;
+    }
+    const baseY = this.y + this.airY + hop; // 上方向ほど小さい(負)
+    ctx.save();
+    ctx.translate(this.x, baseY);
+
+    // 足元の影（地面に固定し、高さに応じて縮小）
+    const groundLocal = this.y - baseY;       // 地面までのローカル距離(>=0)
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.12, 0.4 - groundLocal * 0.0016);
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(0, groundLocal, Math.max(16, 58 - groundLocal * 0.16), Math.max(5, 11 - groundLocal * 0.03), 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 吹っ飛び・ダウンの回転（足元を軸に倒れる）
+    if (this.state === "knockdown" || this.state === "ko") ctx.rotate(this.tumble);
+
+    // 関節計算（ローカル, 足元=0。a=0 で真下、+a で前方向へ）
+    const seg = (ox, oy, a, len) => ({ x: ox + Math.sin(a) * f * len, y: oy + Math.cos(a) * len });
+
+    const hip = { x: 0, y: -p.hipH };
+    const shoulder = { x: hip.x + Math.sin(p.lean) * f * 64, y: hip.y - Math.cos(p.lean) * 64 };
+    const neck = { x: lerp(hip.x, shoulder.x, 1.06), y: lerp(hip.y, shoulder.y, 1.06) };
+    const head = { x: neck.x + Math.sin(p.lean) * f * 6, y: neck.y - 20 };
+
+    // 攻撃時、当てにいく手足を伸ばす（タメで縮め→振り抜きで伸び切る）
+    let mUAf = 1, mFAf = 1, mUAb = 1, mFAb = 1, mTHf = 1, mSHf = 1, mTHb = 1, mSHb = 1;
+    if (this.state === "attack" && this.attack) {
+      const a = this.attack, m = a.move, tn = a.t;
+      let s; // 伸縮量(-:縮む / +:伸びる)
+      if (tn < m.hs) { const k = m.hs > 0 ? tn / m.hs : 1; s = -0.16 * (k * (2 - k)); }
+      else if (tn <= m.he) { const k = (tn - m.hs) / Math.max(0.001, m.he - m.hs); s = 1 - Math.pow(1 - k, 3); }
+      else { const k = (tn - m.he) / Math.max(0.001, m.dur - m.he); s = Math.max(0, 1 - k * k); }
+      const up = 1 + 0.16 * s, fore = 1 + 0.55 * s, th = 1 + 0.14 * s, sh = 1 + 0.6 * s;
+      if (m.pose === "kick") { if (m.arm === "back") { mTHb = th; mSHb = sh; } else { mTHf = th; mSHf = sh; } }
+      else if (m.pose === "jumpkick") { mTHf = th; mSHf = sh; }
+      else if (m.pose === "spin") { mUAf = mUAb = up; mFAf = mFAb = fore; }
+      else if (m.pose === "upper" || m.pose === "push") { mUAf = up; mFAf = fore; }
+      else if (m.arm === "back") { mUAb = up; mFAb = fore; }
+      else { mUAf = up; mFAf = fore; }
+    }
+
+    const UA = 34, FA = 30, TH = 48, SH = 48;
+    const bElbow = seg(shoulder.x, shoulder.y, p.bSh, UA * mUAb);
+    const bHand = seg(bElbow.x, bElbow.y, p.bEl, FA * mFAb);
+    const fElbow = seg(shoulder.x, shoulder.y, p.fSh, UA * mUAf);
+    const fHand = seg(fElbow.x, fElbow.y, p.fEl, FA * mFAf);
+    const bKnee = seg(hip.x, hip.y, p.bHip, TH * mTHb);
+    const bFoot = seg(bKnee.x, bKnee.y, p.bKnee, SH * mSHb);
+    const fKnee = seg(hip.x, hip.y, p.fHip, TH * mTHf);
+    const fFoot = seg(fKnee.x, fKnee.y, p.fKnee, SH * mSHf);
+
+    const C = this.colors;
+    const flashing = this.flash > 0 && Math.floor(this.flash * 30) % 2 === 0;
+    const skin = flashing ? "#ffffff" : C.skin;
+    const cloth = flashing ? "#ffffff" : C.cloth;
+    const cloth2 = flashing ? "#ffffff" : C.cloth2;
+
+    // 先細り・円筒陰影・ハイライト付きの「筋肉的な」手足
+    function limb(x1, y1, x2, y2, w, col, edge) {
+      const dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy) || 1;
+      const nx = -dy / len, ny = dx / len;            // 法線
+      const r1 = w / 2, r2 = Math.max(2.5, w * 0.34); // 付け根→先端で先細り
+      const TWO = Math.PI * 2;
+      const quad = (a, b) => {
+        ctx.beginPath();
+        ctx.moveTo(x1 + nx * a, y1 + ny * a);
+        ctx.lineTo(x2 + nx * b, y2 + ny * b);
+        ctx.lineTo(x2 - nx * b, y2 - ny * b);
+        ctx.lineTo(x1 - nx * a, y1 - ny * a);
+        ctx.closePath();
+      };
+      // 輪郭（少し太らせた暗色レイヤ）
+      ctx.fillStyle = edge;
+      quad(r1 + 2, r2 + 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x1, y1, r1 + 2, 0, TWO); ctx.fill();
+      ctx.beginPath(); ctx.arc(x2, y2, r2 + 2, 0, TWO); ctx.fill();
+      // 本体（断面方向のグラデで円筒感）
+      const g = ctx.createLinearGradient(x1 + nx * r1, y1 + ny * r1, x1 - nx * r1, y1 - ny * r1);
+      g.addColorStop(0, shade(col, 0.20));
+      g.addColorStop(0.45, col);
+      g.addColorStop(1, shade(col, -0.26));
+      ctx.fillStyle = g;
+      quad(r1, r2); ctx.fill();
+      ctx.beginPath(); ctx.arc(x1, y1, r1, 0, TWO); ctx.fill();
+      ctx.beginPath(); ctx.arc(x2, y2, r2, 0, TWO); ctx.fill();
+      // 光沢ハイライト（片側に細く）
+      const off1 = r1 * 0.42, off2 = r2 * 0.42, hw1 = r1 * 0.34, hw2 = r2 * 0.34;
+      ctx.fillStyle = "rgba(255,255,255,0.16)";
+      ctx.beginPath();
+      ctx.moveTo(x1 + nx * (off1 + hw1), y1 + ny * (off1 + hw1));
+      ctx.lineTo(x2 + nx * (off2 + hw2), y2 + ny * (off2 + hw2));
+      ctx.lineTo(x2 + nx * (off2 - hw2), y2 + ny * (off2 - hw2));
+      ctx.lineTo(x1 + nx * (off1 - hw1), y1 + ny * (off1 - hw1));
+      ctx.closePath(); ctx.fill();
+    }
+    const edge = flashing ? "#ffffff" : "#0a0c18";
+
+    // 奥脚・奥腕（暗め）
+    limb(hip.x, hip.y, bKnee.x, bKnee.y, 17, shade(cloth2, -.25), edge);
+    limb(bKnee.x, bKnee.y, bFoot.x, bFoot.y, 13, shade(skin, -.25), edge);
+    drawFoot(ctx, bKnee, bFoot, f, shade(C.shoe, -.2), edge);
+    limb(shoulder.x, shoulder.y, bElbow.x, bElbow.y, 13, shade(cloth, -.22), edge);
+    limb(bElbow.x, bElbow.y, bHand.x, bHand.y, 11, shade(skin, -.22), edge);
+    drawHand(ctx, bHand, 9, shade(skin, -.22), edge);
+
+    // 胴（トルソ：肩〜腰のテーパー）
+    drawTorso(ctx, hip, shoulder, f, cloth, cloth2, edge, C.belt);
+
+    // 手前脚・手前腕（明るい）
+    limb(hip.x, hip.y, fKnee.x, fKnee.y, 18, cloth2, edge);
+    limb(fKnee.x, fKnee.y, fFoot.x, fFoot.y, 14, skin, edge);
+    drawFoot(ctx, fKnee, fFoot, f, C.shoe, edge);
+
+    // 頭
+    drawHead(ctx, head, f, skin, edge, C);
+
+    limb(shoulder.x, shoulder.y, fElbow.x, fElbow.y, 14, cloth, edge);
+    limb(fElbow.x, fElbow.y, fHand.x, fHand.y, 12, skin, edge);
+    drawHand(ctx, fHand, 10, skin, edge);
+
+    // 必殺技チャージ/発生オーラ
+    if (this.state === "attack" && this.attack && this.attack.move.projectile) {
+      const a = this.attack;
+      const gx = shoulder.x + f * 22, gy = (shoulder.y + hip.y) / 2;
+      const r = 10 + Math.min(28, a.t * 90);
+      const grd = ctx.createRadialGradient(gx, gy, 0, gx, gy, r);
+      grd.addColorStop(0, "rgba(120,220,255,.95)");
+      grd.addColorStop(0.5, "rgba(90,150,255,.6)");
+      grd.addColorStop(1, "rgba(90,150,255,0)");
+      ctx.fillStyle = grd; ctx.beginPath(); ctx.arc(gx, gy, r, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 攻撃の軌跡(swoosh)用に、振っている手/足の先端をワールド座標で記録
+    let tipW = null;
+    if (this.state === "attack" && this.attack) {
+      const m = this.attack.move, at = this.attack.t;
+      if (!m.projectile && at >= m.hs - 0.03 && at <= m.he + 0.05) {
+        let tp = (m.pose === "kick") ? (m.arm === "back" ? bFoot : fFoot)
+               : (m.arm === "back" ? bHand : fHand);
+        if (m.pose === "upper" || m.pose === "push") tp = fHand;
+        tipW = { x: this.x + tp.x, y: baseY + tp.y };
+      }
+    }
+    ctx.restore();
+
+    // 軌跡の更新＆描画（ワールド座標・残像）
+    if (tipW) { this.trail.push(tipW); if (this.trail.length > 9) this.trail.shift(); }
+    else if (this.trail.length) this.trail.length = 0;
+    if (this.trail.length > 1) drawTrail(ctx, this.trail);
+  }
+}
+
+// 攻撃の残像（光るスウッシュ）
+function drawTrail(ctx, pts) {
+  ctx.save();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const n = pts.length;
+  for (let layer = 0; layer < 2; layer++) {
+    for (let i = 1; i < n; i++) {
+      const f = i / (n - 1);              // 新しいほど太く濃く
+      ctx.beginPath();
+      ctx.moveTo(pts[i - 1].x, pts[i - 1].y);
+      ctx.lineTo(pts[i].x, pts[i].y);
+      if (layer === 0) { ctx.strokeStyle = "rgba(150,205,255," + (0.16 * f).toFixed(3) + ")"; ctx.lineWidth = 8 + 34 * f; }
+      else { ctx.strokeStyle = "rgba(255,255,255," + (0.55 * f).toFixed(3) + ")"; ctx.lineWidth = 2 + 13 * f; }
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+/* 描画ヘルパ */
+function shade(hex, amt) {
+  const c = hex.replace("#", "");
+  let r = parseInt(c.substr(0, 2), 16), g = parseInt(c.substr(2, 2), 16), b = parseInt(c.substr(4, 2), 16);
+  r = Math.max(0, Math.min(255, r + amt * 255));
+  g = Math.max(0, Math.min(255, g + amt * 255));
+  b = Math.max(0, Math.min(255, b + amt * 255));
+  return `rgb(${r | 0},${g | 0},${b | 0})`;
+}
+function drawTorso(ctx, hip, sh, f, cloth, cloth2, edge, belt) {
+  const hw = 15, sw = 25, waistY = lerp(sh.y, hip.y, 0.52);
+  const ax = sh.x - hip.x, ay = sh.y - hip.y, al = Math.hypot(ax, ay) || 1;
+  const px = -ay / al, py = ax / al;                 // 体軸の法線（横方向）
+  const waistX = lerp(hip.x, sh.x, 0.52), ww = 13;
+  // 胴シルエット（肩広→腰くびれの逆三角）
+  ctx.beginPath();
+  ctx.moveTo(hip.x - px * hw, hip.y - py * hw);
+  ctx.quadraticCurveTo(waistX - px * ww, waistY - py * ww, sh.x - px * sw, sh.y - py * sw);
+  ctx.quadraticCurveTo(sh.x, sh.y - 9, sh.x + px * sw, sh.y + py * sw);
+  ctx.quadraticCurveTo(waistX + px * ww, waistY + py * ww, hip.x + px * hw, hip.y + py * hw);
+  ctx.quadraticCurveTo(hip.x, hip.y + 9, hip.x - px * hw, hip.y - py * hw);
+  ctx.closePath();
+  const grd = ctx.createLinearGradient(sh.x - px * sw, sh.y, sh.x + px * sw, sh.y);
+  grd.addColorStop(0, shade(cloth, .12)); grd.addColorStop(0.45, cloth);
+  grd.addColorStop(1, shade(cloth, -.30));
+  ctx.fillStyle = grd; ctx.fill();
+  ctx.lineWidth = 4; ctx.strokeStyle = edge; ctx.lineJoin = "round"; ctx.stroke();
+  // 道着の前合わせ（中心線）と胸の陰影
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = shade(cloth, -.34); ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(sh.x + px * f * 2, sh.y);
+  ctx.lineTo(waistX + px * f * 6, waistY);
+  ctx.lineTo(hip.x, hip.y); ctx.stroke();
+  // 胸筋の分割ライン
+  const pecY = lerp(sh.y, waistY, 0.5);
+  ctx.lineWidth = 2; ctx.strokeStyle = "rgba(0,0,0,0.18)";
+  ctx.beginPath();
+  ctx.moveTo(sh.x - px * sw * 0.6, sh.y + 6);
+  ctx.quadraticCurveTo(waistX, pecY, waistX, pecY); ctx.stroke();
+  // 道着の影（奥側を暗く）
+  const sg = ctx.createLinearGradient(sh.x - px * sw, sh.y, sh.x + px * sw, sh.y);
+  sg.addColorStop(0, "rgba(0,0,0,0)"); sg.addColorStop(1, "rgba(0,0,0,0.22)");
+  ctx.fillStyle = sg; ctx.fill();
+  ctx.restore();
+  // ベルト（結び目付き）
+  ctx.strokeStyle = shade(belt, -.2); ctx.lineWidth = 11; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(hip.x - px * hw, hip.y - 3); ctx.lineTo(hip.x + px * hw, hip.y - 3); ctx.stroke();
+  ctx.strokeStyle = belt; ctx.lineWidth = 8;
+  ctx.beginPath(); ctx.moveTo(hip.x - px * hw, hip.y - 4); ctx.lineTo(hip.x + px * hw, hip.y - 4); ctx.stroke();
+  ctx.fillStyle = belt;
+  ctx.beginPath(); ctx.arc(hip.x + f * 4, hip.y - 3, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = belt; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(hip.x + f * 4, hip.y); ctx.lineTo(hip.x + f * 9, hip.y + 14); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(hip.x + f * 2, hip.y); ctx.lineTo(hip.x - f * 2, hip.y + 13); ctx.stroke();
+}
+function drawHead(ctx, head, f, skin, edge, C) {
+  ctx.save();
+  const R = 15;
+  // 首
+  ctx.strokeStyle = edge; ctx.lineCap = "round"; ctx.lineWidth = 18;
+  ctx.beginPath(); ctx.moveTo(head.x - f * 2, head.y + 8); ctx.lineTo(head.x - f * 2, head.y + 22); ctx.stroke();
+  ctx.strokeStyle = shade(skin, -.12); ctx.lineWidth = 14;
+  ctx.beginPath(); ctx.moveTo(head.x - f * 2, head.y + 8); ctx.lineTo(head.x - f * 2, head.y + 22); ctx.stroke();
+  // 顔（やや卵型・あご）
+  ctx.beginPath();
+  ctx.moveTo(head.x - f * R, head.y - 2);
+  ctx.quadraticCurveTo(head.x - f * R, head.y - R, head.x, head.y - R);
+  ctx.quadraticCurveTo(head.x + f * R, head.y - R, head.x + f * R, head.y - 1);
+  ctx.quadraticCurveTo(head.x + f * R * 0.95, head.y + R * 0.7, head.x + f * 3, head.y + R * 0.95); // あご
+  ctx.quadraticCurveTo(head.x - f * 4, head.y + R * 0.7, head.x - f * R, head.y - 2);
+  ctx.closePath();
+  const fg = ctx.createLinearGradient(head.x - R, head.y, head.x + R, head.y);
+  fg.addColorStop(f > 0 ? 0 : 1, shade(skin, .10));
+  fg.addColorStop(f > 0 ? 1 : 0, shade(skin, -.16));
+  ctx.fillStyle = fg; ctx.fill();
+  ctx.lineWidth = 3.5; ctx.strokeStyle = edge; ctx.stroke();
+  // 耳
+  ctx.fillStyle = shade(skin, -.08);
+  ctx.beginPath(); ctx.ellipse(head.x - f * (R - 1), head.y + 2, 3.5, 5, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = edge; ctx.stroke();
+  // 髪（毛束・トゲ）
+  ctx.fillStyle = C.hair;
+  ctx.beginPath();
+  ctx.moveTo(head.x - f * R, head.y + 1);
+  ctx.quadraticCurveTo(head.x - f * (R + 2), head.y - R - 3, head.x - f * 4, head.y - R - 2);
+  ctx.lineTo(head.x - f * 7, head.y - R - 8);
+  ctx.lineTo(head.x - f * 1, head.y - R - 3);
+  ctx.lineTo(head.x + f * 4, head.y - R - 9);
+  ctx.lineTo(head.x + f * 6, head.y - R - 2);
+  ctx.lineTo(head.x + f * 11, head.y - R - 6);
+  ctx.quadraticCurveTo(head.x + f * (R + 1), head.y - R + 2, head.x + f * R, head.y - 4);
+  ctx.lineTo(head.x + f * (R - 4), head.y - 6);
+  ctx.quadraticCurveTo(head.x, head.y - R + 1, head.x - f * (R - 5), head.y - 6);
+  ctx.closePath(); ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = shade(C.hair, -.25); ctx.stroke();
+  // ヘッドバンド（額に巻く）
+  ctx.fillStyle = C.band;
+  ctx.beginPath();
+  ctx.moveTo(head.x - f * (R + 1), head.y - 3);
+  ctx.quadraticCurveTo(head.x, head.y - 9, head.x + f * (R + 1), head.y - 4);
+  ctx.lineTo(head.x + f * (R + 1), head.y + 1);
+  ctx.quadraticCurveTo(head.x, head.y - 4, head.x - f * (R + 1), head.y + 1);
+  ctx.closePath(); ctx.fill();
+  ctx.lineWidth = 1.5; ctx.strokeStyle = shade(C.band, -.3); ctx.stroke();
+  // バンドのなびく結び
+  ctx.fillStyle = C.band;
+  ctx.beginPath();
+  ctx.moveTo(head.x - f * (R - 1), head.y - 3);
+  ctx.lineTo(head.x - f * (R + 16), head.y + 4);
+  ctx.lineTo(head.x - f * (R + 15), head.y + 9);
+  ctx.lineTo(head.x - f * (R - 2), head.y + 2);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(head.x - f * (R - 1), head.y - 2);
+  ctx.lineTo(head.x - f * (R + 12), head.y + 12);
+  ctx.lineTo(head.x - f * (R + 9), head.y + 15);
+  ctx.lineTo(head.x - f * (R - 2), head.y + 3);
+  ctx.closePath(); ctx.fill();
+  // 眉
+  ctx.strokeStyle = edge; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(head.x + f * 3, head.y - 2); ctx.lineTo(head.x + f * 10, head.y - 1); ctx.stroke();
+  // 目
+  ctx.fillStyle = "#fff";
+  ctx.beginPath(); ctx.ellipse(head.x + f * 7, head.y + 3, 3.2, 2.4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = edge;
+  ctx.beginPath(); ctx.arc(head.x + f * 8, head.y + 3, 1.7, 0, Math.PI * 2); ctx.fill();
+  // 鼻・口
+  ctx.strokeStyle = shade(skin, -.3); ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(head.x + f * (R - 2), head.y + 4); ctx.lineTo(head.x + f * (R - 3), head.y + 7); ctx.stroke();
+  ctx.strokeStyle = edge; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(head.x + f * 7, head.y + 10); ctx.lineTo(head.x + f * 12, head.y + 9); ctx.stroke();
+  ctx.restore();
+}
+function drawHand(ctx, h, r, col, edge) {
+  ctx.save();
+  // 拳（グローブ風）：本体＋指の段差＋親指
+  ctx.lineWidth = 3; ctx.strokeStyle = edge; ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.ellipse(h.x, h.y, r * 1.12, r, 0, 0, Math.PI * 2);
+  const g = ctx.createRadialGradient(h.x - r * 0.4, h.y - r * 0.4, 1, h.x, h.y, r * 1.3);
+  g.addColorStop(0, shade(col, .22)); g.addColorStop(1, shade(col, -.18));
+  ctx.fillStyle = g; ctx.fill(); ctx.stroke();
+  // 指の関節ライン
+  ctx.strokeStyle = "rgba(0,0,0,0.22)"; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(h.x - r * 0.7, h.y - r * 0.3); ctx.lineTo(h.x + r * 0.7, h.y - r * 0.45); ctx.stroke();
+  // 親指
+  ctx.fillStyle = shade(col, .05); ctx.lineWidth = 2.5; ctx.strokeStyle = edge;
+  ctx.beginPath(); ctx.ellipse(h.x, h.y + r * 0.55, r * 0.45, r * 0.62, 0, 0, Math.PI * 2);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+function drawFoot(ctx, knee, foot, f, col, edge) {
+  ctx.save();
+  ctx.translate(foot.x, foot.y);
+  // つま先が進行方向（脚の向き）を向くよう、軽く傾ける
+  const ang = Math.atan2(foot.x - knee.x, -(foot.y - knee.y)); // 脚のかたむき
+  ctx.rotate(Math.max(-0.5, Math.min(0.5, ang * 0.25)));
+  ctx.lineJoin = "round"; ctx.lineWidth = 3; ctx.strokeStyle = edge;
+  // ソール（底）
+  ctx.fillStyle = shade(col, -.35);
+  ctx.beginPath();
+  ctx.moveTo(-13, 4); ctx.lineTo(f * 18, 5);
+  ctx.quadraticCurveTo(f * 22, 5, f * 22, 1); ctx.lineTo(-13, 0);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  // アッパー（甲）
+  const g = ctx.createLinearGradient(0, -8, 0, 4);
+  g.addColorStop(0, shade(col, .18)); g.addColorStop(1, shade(col, -.1));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.moveTo(-12, 1);
+  ctx.quadraticCurveTo(-13, -8, -3, -8);
+  ctx.quadraticCurveTo(f * 8, -8, f * 16, -2);
+  ctx.quadraticCurveTo(f * 20, 0, f * 18, 2);
+  ctx.lineTo(-12, 1); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // 足首口
+  ctx.fillStyle = shade(col, .25);
+  ctx.beginPath(); ctx.ellipse(-f * 2, -6, 5, 3.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
+
+/* =====================================================================
+   PROJECTILE（必殺技の飛び道具）
+   ===================================================================== */
+class Projectile {
+  constructor(owner) {
+    this.owner = owner;
+    this.x = owner.x + owner.facing * 40;
+    this.y = owner.y - 110;
+    this.dir = owner.facing;
+    this.vx = 620 * this.dir;
+    this.r = 26; this.life = 2.2; this.dead = false; this.hasHit = false;
+    this.phase = 0;
+  }
+  update(dt) { this.x += this.vx * dt; this.phase += dt * 16; this.life -= dt; if (this.life <= 0 || this.x < FLOOR_MIN - 40 || this.x > FLOOR_MAX + 40) this.dead = true; }
+  box() { return { x: this.x - this.r, y: this.y - this.r, w: this.r * 2, h: this.r * 2 }; }
+  draw(ctx) {
+    ctx.save();
+    const r = this.r + Math.sin(this.phase) * 3;
+    const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 1.8);
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.3, "rgba(140,230,255,.95)");
+    g.addColorStop(0.7, "rgba(90,140,255,.6)");
+    g.addColorStop(1, "rgba(90,140,255,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(this.x, this.y, r * 1.8, 0, Math.PI * 2); ctx.fill();
+    // 尾
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.ellipse(this.x - this.dir * r, this.y, r * 1.6, r * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+}
+
+/* =====================================================================
+   EFFECTS（パーティクル / リング）
+   ===================================================================== */
+function drawStar(ctx, cx, cy, spikes, outer, inner) {
+  ctx.beginPath();
+  for (let i = 0; i < spikes * 2; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = i / (spikes * 2) * Math.PI * 2 - Math.PI / 2;
+    const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath(); ctx.fill();
+}
+
+class Effects {
+  constructor() { this.parts = []; this.rings = []; this.bursts = []; this.lines = []; }
+  spark(x, y, dir, color, n) {
+    for (let i = 0; i < n; i++) {
+      const a = (Math.random() - 0.5) * 2.2 + (dir > 0 ? 0 : Math.PI);
+      const sp = 120 + Math.random() * 320;
+      this.parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 60, life: 0.3 + Math.random() * 0.3, max: 0.6, color, size: 2 + Math.random() * 3 });
+    }
+  }
+  // 全方向に強く弾ける派手な火花（吹っ飛び用）
+  blast(x, y, color, n, power) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = (200 + Math.random() * 600) * (power || 1);
+      this.parts.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120, life: 0.4 + Math.random() * 0.5, max: 0.9, color, size: 2 + Math.random() * 4 });
+    }
+  }
+  ring(x, y, color) { this.rings.push({ x, y, r: 6, life: 0.25, max: 0.25, color, lw: 4 }); }
+  shock(x, y, color) { this.rings.push({ x, y, r: 10, life: 0.4, max: 0.4, color, lw: 12 }); }
+  burst(x, y, color) { this.bursts.push({ x, y, r: 14, life: 0.3, max: 0.3, color: color || "#fff" }); }
+  speedlines(x, y, color) { this.lines.push({ x, y, life: 0.28, max: 0.28, color: color || "#fff" }); }
+  update(dt) {
+    for (const p of this.parts) { p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
+    this.parts = this.parts.filter(p => p.life > 0);
+    for (const r of this.rings) { r.r += (r.lw > 6 ? 700 : 380) * dt; r.life -= dt; }
+    this.rings = this.rings.filter(r => r.life > 0);
+    for (const b of this.bursts) { b.r += 1500 * dt; b.life -= dt; }
+    this.bursts = this.bursts.filter(b => b.life > 0);
+    for (const l of this.lines) l.life -= dt;
+    this.lines = this.lines.filter(l => l.life > 0);
+  }
+  draw(ctx) {
+    // 集中線
+    for (const l of this.lines) {
+      const a = Math.max(0, l.life / l.max); ctx.save(); ctx.globalAlpha = a * 0.85;
+      ctx.strokeStyle = l.color; ctx.lineWidth = 4; ctx.lineCap = "round";
+      for (let i = 0; i < 18; i++) {
+        const ang = i / 18 * Math.PI * 2 + (1 - a);
+        const r1 = 50 + (1 - a) * 140, r2 = r1 + 70 + a * 90;
+        ctx.beginPath();
+        ctx.moveTo(l.x + Math.cos(ang) * r1, l.y + Math.sin(ang) * r1);
+        ctx.lineTo(l.x + Math.cos(ang) * r2, l.y + Math.sin(ang) * r2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // リング/衝撃波
+    for (const r of this.rings) {
+      ctx.save(); ctx.globalAlpha = Math.max(0, r.life / r.max);
+      ctx.strokeStyle = r.color; ctx.lineWidth = r.lw;
+      ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
+    // 衝撃スター（バーン）
+    for (const b of this.bursts) {
+      const a = Math.max(0, b.life / b.max); ctx.save(); ctx.globalAlpha = a;
+      const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, b.r * 1.6);
+      g.addColorStop(0, b.color); g.addColorStop(0.4, b.color); g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g; drawStar(ctx, b.x, b.y, 12, b.r * 1.6, b.r * 0.7);
+      ctx.fillStyle = "#fff"; drawStar(ctx, b.x, b.y, 10, b.r, b.r * 0.45);
+      ctx.restore();
+    }
+    // 火花
+    for (const p of this.parts) {
+      ctx.save(); ctx.globalAlpha = Math.max(0, p.life / p.max);
+      ctx.fillStyle = p.color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
+/* =====================================================================
+   BACKGROUND（パララックス・ステージ）
+   ===================================================================== */
+const Stage = (() => {
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const SKY_Y = H * 0.6;                     // ビルが立つ地平線
+  // 崩れたビル1棟ぶんのプロファイルを生成
+  function makeBuilding(w, h) {
+    const top = [];                          // 崩れたギザギザの屋根
+    const segs = 3 + (w / 24 | 0);
+    let y = rnd(0, h * 0.12);
+    for (let i = 0; i <= segs; i++) {
+      if (Math.random() < 0.42) y = rnd(0, h * 0.42);   // 大きく欠ける
+      else y = Math.max(0, Math.min(h * 0.45, y + rnd(-8, 8)));
+      top.push(y);
+    }
+    const win = [];                          // 数少ない・割れた窓（一部に灯り）
+    for (let cx = 7; cx < w - 9; cx += 13) {
+      for (let cy = h * 0.46; cy < h - 10; cy += 18) {
+        if (Math.random() < 0.5) continue;
+        win.push({ x: cx, y: cy, lit: Math.random() < 0.32, ph: Math.random() * 9 });
+      }
+    }
+    return { w, h, top, win };
+  }
+  function makeLayer(n, hmin, hmax, gmin, gmax) {
+    const items = []; let span = 0;
+    for (let i = 0; i < n; i++) {
+      const w = rnd(55, 120), h = rnd(hmin, hmax);
+      items.push({ x: span, b: makeBuilding(w, h) });
+      span += w + rnd(gmin, gmax);
+    }
+    return { items, span };
+  }
+  const farL = makeLayer(18, 70, 170, 10, 34);
+  const midL = makeLayer(13, 120, 280, 26, 80);
+  const stars = [];
+  for (let i = 0; i < 60; i++) stars.push({ x: Math.random() * W, y: Math.random() * (H * 0.42), s: Math.random() * 1.4 });
+  const smoke = [];                          // 立ち上る煙
+  for (let i = 0; i < 5; i++) smoke.push({ x: Math.random() * W, base: SKY_Y - rnd(20, 160), ph: Math.random() * 9, w: rnd(26, 50) });
+  const ash = [];                            // 舞う灰・火の粉
+  for (let i = 0; i < 50; i++) ash.push({ x: Math.random() * W, y: Math.random() * H, sp: 5 + Math.random() * 14, sw: 12 + Math.random() * 46, ph: Math.random() * 9, r: 1 + Math.random() * 1.8, ember: Math.random() < 0.22 });
+  const debris = [];                         // 路上のがれき
+  for (let i = 0; i < 30; i++) debris.push({ x: Math.random() * (W + 200), y: GROUND_Y + rnd(8, 80), w: 8 + Math.random() * 34, h: 4 + Math.random() * 14, t: Math.random() });
+
+  function building(x, b, fill, winCol, t) {
+    const topY = SKY_Y - b.h, n = b.top.length;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.moveTo(x, SKY_Y);
+    ctx.lineTo(x, topY + b.top[0]);
+    for (let i = 0; i < n; i++) ctx.lineTo(x + b.w * (i / (n - 1)), topY + b.top[i]);
+    ctx.lineTo(x + b.w, SKY_Y);
+    ctx.closePath(); ctx.fill();
+    if (!winCol) return;
+    for (const w of b.win) {
+      if (w.lit) {
+        const a = 0.35 + 0.4 * Math.abs(Math.sin(t * 2.3 + w.ph));
+        ctx.fillStyle = "rgba(255,168,74," + a.toFixed(2) + ")";
+      } else ctx.fillStyle = "rgba(0,0,0,0.4)";
+      ctx.fillRect(x + w.x, topY + w.y, 5, 7);
+    }
+  }
+  function layer(L, par, fill, winCol, t, camX) {
+    const passes = Math.ceil((W + 40) / L.span) + 1;
+    const off = -(((camX * par) % L.span) + L.span) % L.span;
+    for (let p = 0; p < passes; p++) {
+      const base = off + p * L.span;
+      for (const it of L.items) {
+        const bx = base + it.x;
+        if (bx > W + 10 || bx + it.b.w < -10) continue;
+        building(bx, it.b, fill, winCol, t);
+      }
+    }
+  }
+
+  function draw(ctx2, t, camX) {
+    // 空（煤けた夜空）
+    const sky = ctx.createLinearGradient(0, 0, 0, SKY_Y + 40);
+    sky.addColorStop(0, "#070810"); sky.addColorStop(0.45, "#15121c");
+    sky.addColorStop(0.78, "#2a1d24"); sky.addColorStop(1, "#3c2620");
+    ctx.fillStyle = sky; ctx.fillRect(0, 0, W, SKY_Y + 40);
+    // 地平の遠火の赤い照り返し
+    const fireGlow = ctx.createLinearGradient(0, SKY_Y - 150, 0, SKY_Y);
+    fireGlow.addColorStop(0, "rgba(180,60,30,0)");
+    fireGlow.addColorStop(1, "rgba(190,70,32,0.28)");
+    ctx.fillStyle = fireGlow; ctx.fillRect(0, SKY_Y - 150, W, 150);
+    // 星（うっすら）
+    ctx.fillStyle = "#aeb6d0";
+    for (const s of stars) { ctx.globalAlpha = 0.18 + 0.32 * Math.abs(Math.sin(t + s.x)); ctx.fillRect((s.x - camX * 0.08 % W + W) % W, s.y, s.s, s.s); }
+    ctx.globalAlpha = 1;
+    // 霞んだ月
+    const mx = (W * 0.78 - camX * 0.08 % W + W) % W;
+    const mg = ctx.createRadialGradient(mx, 150, 8, mx, 150, 110);
+    mg.addColorStop(0, "rgba(220,200,180,.5)"); mg.addColorStop(1, "rgba(180,150,120,0)");
+    ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(mx, 150, 110, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#d9cdba"; ctx.beginPath(); ctx.arc(mx, 150, 42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(40,30,28,.35)"; ctx.beginPath(); ctx.arc(mx + 12, 142, 12, 0, Math.PI * 2); ctx.fill();
+    // 流れる煤煙の雲
+    ctx.fillStyle = "rgba(20,14,16,0.5)";
+    for (let i = 0; i < 5; i++) {
+      const cx = ((i * 320 - camX * 0.06 + t * 6) % (W + 300) + W + 300) % (W + 300) - 150;
+      ctx.beginPath(); ctx.ellipse(cx, 60 + i * 26, 180, 34, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    // 遠景ビル（霞む）→ 近景ビル（灯りつき）
+    layer(farL, 0.12, "#14111b", null, t, camX);
+    ctx.fillStyle = "rgba(60,38,34,0.22)"; ctx.fillRect(0, SKY_Y - 200, W, 200); // 大気遠近
+    layer(midL, 0.26, "#0b0910", "lit", t, camX);
+    // 立ち上る煙
+    for (const s of smoke) {
+      const sx = (s.x - camX * 0.26 % W + W) % W;
+      for (let k = 0; k < 7; k++) {
+        const yy = s.base - k * 26 - (t * 14 % 26);
+        const drift = Math.sin(t * 0.5 + s.ph + k * 0.6) * (8 + k * 3);
+        ctx.globalAlpha = Math.max(0, 0.22 - k * 0.03);
+        ctx.fillStyle = "#1c1418";
+        ctx.beginPath(); ctx.ellipse(sx + drift, yy, s.w * 0.5 + k * 3, s.w * 0.34 + k * 2, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // 中景：瓦礫の丘・荒地
+    const lotG = ctx.createLinearGradient(0, SKY_Y - 4, 0, GROUND_Y);
+    lotG.addColorStop(0, "#0a0810"); lotG.addColorStop(1, "#161019");
+    ctx.fillStyle = lotG; ctx.fillRect(0, SKY_Y - 4, W, GROUND_Y - SKY_Y + 6);
+    ctx.fillStyle = "#0d0a12";
+    for (let i = 0; i < 11; i++) {
+      const rx = (i * 150 - camX * 0.34 % 150 + W + 150) % (W + 150) - 75;
+      const ry = SKY_Y + 6 + (i * 37 % 40);
+      ctx.beginPath();
+      ctx.moveTo(rx - 50, GROUND_Y); ctx.lineTo(rx - 20, ry); ctx.lineTo(rx + 8, ry + 14);
+      ctx.lineTo(rx + 30, ry - 6); ctx.lineTo(rx + 64, GROUND_Y); ctx.closePath(); ctx.fill();
+    }
+    // シルエットの目印（枯木・傾いた電柱・廃車）
+    prop("tree", 0.4, 0.16, camX);
+    prop("pole", 0.4, 0.62, camX);
+    prop("car", 0.46, 0.86, camX);
+
+    // 路面（ひび割れたアスファルト）
+    const fy = GROUND_Y;
+    const fg = ctx.createLinearGradient(0, fy - 6, 0, H);
+    fg.addColorStop(0, "#2b2630"); fg.addColorStop(0.5, "#1b1820"); fg.addColorStop(1, "#0c0a10");
+    ctx.fillStyle = fg; ctx.fillRect(0, fy - 6, W, H - fy + 6);
+    // 縁石ハイライト
+    ctx.strokeStyle = "rgba(120,100,90,.18)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0, fy - 4); ctx.lineTo(W, fy - 4); ctx.stroke();
+    // ひび割れ
+    ctx.strokeStyle = "rgba(0,0,0,.5)"; ctx.lineWidth = 2;
+    for (let i = 0; i < 7; i++) {
+      const cx = (i * 200 - camX * 0.6 % 200 + W + 200) % (W + 200) - 100;
+      ctx.beginPath(); ctx.moveTo(cx, fy);
+      ctx.lineTo(cx + 26, fy + 34); ctx.lineTo(cx - 14, fy + 70); ctx.lineTo(cx + 40, H);
+      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx + 26, fy + 34); ctx.lineTo(cx + 70, fy + 50); ctx.stroke();
+    }
+    // 路上のがれき
+    for (const d of debris) {
+      const dx = (d.x - camX * 0.6 % (W + 200) + W + 200) % (W + 200) - 100;
+      ctx.fillStyle = d.t < 0.5 ? "#23202b" : "#181520";
+      ctx.beginPath();
+      ctx.moveTo(dx, d.y); ctx.lineTo(dx + d.w * 0.4, d.y - d.h); ctx.lineTo(dx + d.w, d.y - d.h * 0.4);
+      ctx.lineTo(dx + d.w * 0.7, d.y); ctx.closePath(); ctx.fill();
+    }
+
+    // 舞う灰・火の粉（最前面）
+    for (const a of ash) {
+      const ay = (a.y + t * a.sp) % (H + 20);
+      const ax = ((a.x + Math.sin(t * 0.4 + a.ph) * a.sw - camX * 0.3) % W + W) % W;
+      if (a.ember) { ctx.fillStyle = "rgba(255,150,60," + (0.5 + 0.4 * Math.sin(t * 4 + a.ph)).toFixed(2) + ")"; }
+      else { ctx.globalAlpha = 0.35; ctx.fillStyle = "#8a8290"; }
+      ctx.beginPath(); ctx.arc(ax, ay, a.r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // 全体の薄暗いビネット
+    const vg = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.3, W / 2, H * 0.55, H * 0.85);
+    vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.5)");
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  }
+
+  // 中景の目印シルエット（枯木 / 電柱 / 廃車）
+  function prop(kind, par, frac, camX) {
+    const span = W + 360;
+    const x = ((frac * span - camX * par) % span + span) % span - 180;
+    const gy = GROUND_Y;
+    ctx.save();
+    ctx.fillStyle = "#08060c"; ctx.strokeStyle = "#08060c";
+    if (kind === "tree") {
+      ctx.lineCap = "round"; ctx.lineWidth = 9;
+      ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x - 6, gy - 120); ctx.stroke();
+      ctx.lineWidth = 5;
+      const br = [[-6, -120, -38, -150], [-6, -96, 26, -134], [-6, -70, -30, -92], [-6, -110, 8, -150]];
+      for (const b of br) { ctx.beginPath(); ctx.moveTo(x + b[0], gy + b[1]); ctx.lineTo(x + b[2], gy + b[3]); ctx.stroke(); }
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(x - 38, gy - 150); ctx.lineTo(x - 54, gy - 168); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 26, gy - 134); ctx.lineTo(x + 44, gy - 150); ctx.stroke();
+    } else if (kind === "pole") {
+      ctx.save(); ctx.translate(x, gy); ctx.rotate(0.12);
+      ctx.fillRect(-4, -190, 8, 190);
+      ctx.fillRect(-44, -190, 88, 9);            // 腕木
+      ctx.restore();
+      ctx.strokeStyle = "rgba(8,6,12,.7)"; ctx.lineWidth = 2; // たれ下がる電線
+      ctx.beginPath(); ctx.moveTo(x - 40, gy - 184); ctx.quadraticCurveTo(x - 120, gy - 120, x - 200, gy - 150); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 40, gy - 184); ctx.quadraticCurveTo(x + 130, gy - 110, x + 220, gy - 140); ctx.stroke();
+    } else if (kind === "car") {
+      ctx.beginPath();
+      ctx.moveTo(x - 64, gy); ctx.lineTo(x - 58, gy - 30); ctx.lineTo(x - 30, gy - 44);
+      ctx.lineTo(x + 18, gy - 46); ctx.lineTo(x + 40, gy - 24); ctx.lineTo(x + 66, gy - 20);
+      ctx.lineTo(x + 64, gy); ctx.closePath(); ctx.fill();          // 潰れたボディ
+      ctx.fillStyle = "#0c0a12";
+      ctx.beginPath(); ctx.arc(x - 38, gy, 13, 0, Math.PI); ctx.fill(); // タイヤ跡
+      ctx.beginPath(); ctx.arc(x + 40, gy, 13, 0, Math.PI); ctx.fill();
+    }
+    ctx.restore();
+  }
+  return { draw };
+})();
+
+/* =====================================================================
+   GAME
+   ===================================================================== */
+class Game {
+  constructor() {
+    this.fx = new Effects();
+    this.projectiles = [];
+    this.p1 = new Fighter({ name: "あなた", x: W * 0.32, facing: 1, colors: {
+      skin: "#f0b58a", cloth: "#3da6ff", cloth2: "#2b6fd6", shoe: "#1a2740", hair: "#23314f", band: "#ff4d6d", belt: "#10204a" } });
+    this.p2 = new Fighter({ name: "CPU", x: W * 0.68, facing: -1, isCPU: true, colors: {
+      skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } });
+    this.ai = { timer: 0, action: "idle", moveDir: 0, level: 1 };
+    this.state = "title";        // title / ready / fight / roundEnd / matchEnd
+    this.wins = [0, 0];
+    this.round = 1;
+    this.banner = ""; this.bannerT = 0;
+    this.timer = 60;
+    this.hitstop = 0; this.shake = 0; this.slow = 0;
+    this.flash = 0; this.flashMax = 1; this.flashColor = "#ffffff";
+    this.t = 0;
+    this.koTarget = null;
+  }
+  startMatch() {
+    this.wins = [0, 0]; this.round = 1;
+    this.p1.comboIndex = 0; this.p2.comboIndex = 0;  // 新しい試合のみ攻撃ループを最初から
+    Audio_.startBGM();
+    this.startRound();
+  }
+  startRound() {
+    this.p1.reset(1); this.p2.reset(-1);
+    this.projectiles.length = 0; this.fx.parts.length = 0; this.fx.rings.length = 0;
+    this.timer = 60; this.koTarget = null;
+    this.state = "ready"; this.banner = "ROUND " + this.round; this.bannerT = 1.4;
+    Audio_.round();
+  }
+  spawnProjectile(owner) { this.projectiles.push(new Projectile(owner)); Audio_.fire(); }
+  onKO(loser) {
+    if (this.state !== "fight") return;
+    this.koTarget = loser;
+    const winnerIdx = loser === this.p1 ? 1 : 0;
+    this.wins[winnerIdx]++;
+    this.state = "roundEnd";
+    this.banner = (winnerIdx === 0 ? "あなたの勝ち！" : "CPUの勝ち");
+    this.bannerT = 2.6;
+    this.slow = 1.2;
+  }
+
+  /* ---- AI ---- */
+  updateAI(dt) {
+    const me = this.p2, you = this.p1;
+    const a = this.ai;
+    a.timer -= dt;
+    const dist = Math.abs(you.x - me.x);
+    const toYou = Math.sign(you.x - me.x) || 1;
+
+    // 反応ガード：相手が近距離で攻撃中なら高確率でガード
+    if (you.state === "attack" && dist < 170 && me.canAct()) {
+      if (Math.random() < 0.12) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.18; }
+    }
+    // 飛び道具を避ける/ガード
+    for (const pr of this.projectiles) {
+      if (pr.owner === me) continue;
+      if (Math.sign(pr.vx) === toYou * -1 && Math.abs(pr.x - me.x) < 260) {
+        if (Math.random() < 0.06) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
+      }
+    }
+
+    if (a.timer <= 0) {
+      a.timer = 0.18 + Math.random() * 0.35;
+      if (dist > 320) { a.action = "approach"; a.moveDir = toYou; }
+      else if (dist > 150) {
+        const r = Math.random();
+        if (me.meter >= ULTIMATE.cost && r < 0.18) { a.action = "ultimate"; }
+        else if (r < 0.55) { a.action = "approach"; a.moveDir = toYou; }
+        else if (r < 0.72) { a.action = "special"; }
+        else { a.action = "wait"; a.moveDir = (Math.random() < 0.5 ? -toYou : 0); }
+      } else {
+        const r = Math.random();
+        if (me.meter >= ULTIMATE.cost && r < 0.12) a.action = "ultimate";
+        else if (r < 0.30) a.action = "special";
+        else if (r < 0.80) a.action = "normal";
+        else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.25; }
+      }
+    }
+
+    // 実行
+    if (a.action === "approach" || a.action === "wait" || a.action === "block") {
+      me.walk(a.moveDir || 0, you);
+    } else if (me.canAct()) {
+      const g = Math.floor(Math.random() * 5);
+      if (a.action === "normal") me.request("normal", g);
+      else if (a.action === "special") me.request("special", g);
+      else if (a.action === "ultimate") me.request("ultimate", g);
+      a.action = "wait"; a.moveDir = 0; a.timer = 0.4 + Math.random() * 0.3;
+    }
+  }
+
+  /* ---- 衝突判定 ---- */
+  overlap(a, b) { return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y; }
+  checkCombat() {
+    const pair = [[this.p1, this.p2], [this.p2, this.p1]];
+    for (const [atk, def] of pair) {
+      if (atk.state === "attack" && atk.attack && !atk.hasHit) {
+        const rb = atk.getReachBox();
+        if (rb && this.overlap(rb, def.hurtBox())) {
+          atk.hasHit = true;
+          atk.meter = Math.min(MAX_METER, atk.meter + rb.move.meter);
+          def.takeHit(rb.move, atk.facing, this);
+        }
+      }
+    }
+    // 飛び道具
+    for (const pr of this.projectiles) {
+      if (pr.dead || pr.hasHit) continue;
+      const def = pr.owner === this.p1 ? this.p2 : this.p1;
+      if (this.overlap(pr.box(), def.hurtBox())) {
+        pr.hasHit = true; pr.dead = true;
+        def.takeHit({ dmg: ULTIMATE.dmg, kb: 460, up: -120, projectile: true }, pr.dir, this);
+        this.fx.ring(pr.x, pr.y, "#7fd6ff");
+        this.fx.spark(pr.x, pr.y, pr.dir, "#aee6ff", 22);
+      }
+    }
+    // 体の押し合い（吹っ飛び/ダウン中は押し合わない）
+    const grounded = (f) => f.state !== "knockdown" && f.state !== "ko";
+    const d = this.p2.x - this.p1.x;
+    if (Math.abs(d) < 56 && grounded(this.p1) && grounded(this.p2)) {
+      const push = (56 - Math.abs(d)) / 2 * (d >= 0 ? 1 : -1);
+      this.p1.x -= push * 0.5; this.p2.x += push * 0.5;
+      this.p1.x = Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, this.p1.x));
+      this.p2.x = Math.max(FLOOR_MIN, Math.min(FLOOR_MAX, this.p2.x));
+    }
+  }
+
+  update(dt) {
+    this.t += dt;
+    Input.update();
+
+    // タイトル / 結果 → Enterで進行
+    if (this.state === "title") {
+      if (Input.consumeEnter()) this.startMatch();
+      return;
+    }
+    if (this.state === "matchEnd") {
+      this.bannerT -= dt;
+      if (Input.consumeEnter()) { this.state = "title"; Audio_.stopBGM(); }
+      return;
+    }
+
+    // ヒットストップ（この間フラッシュは保持＝バーンが一瞬止まる）
+    if (this.hitstop > 0) { this.hitstop -= dt; this.fx.update(dt * 0.15); return; }
+    // スローモー
+    let sdt = dt;
+    if (this.slow > 0) { this.slow -= dt; sdt = dt * 0.35; }
+    if (this.flash > 0) this.flash -= dt;
+
+    if (this.state === "ready") {
+      this.bannerT -= dt;
+      // 立ち姿だけ更新
+      this.p1.update(sdt, this.p2, this); this.p2.update(sdt, this.p1, this);
+      if (this.bannerT <= 0) { this.state = "fight"; this.banner = "FIGHT!"; this.bannerT = 0.8; }
+    } else if (this.state === "fight") {
+      this.bannerT -= dt;
+      this.timer -= dt;
+      // プレイヤー入力
+      const dir = Input.moveDir();
+      this.p1.walk(dir, this.p2);
+      for (const ev of Input.takeEvents()) this.p1.request(ev.kind, ev.g);
+      // AI
+      this.updateAI(sdt);
+
+      this.p1.update(sdt, this.p2, this);
+      this.p2.update(sdt, this.p1, this);
+      for (const pr of this.projectiles) pr.update(sdt);
+      this.projectiles = this.projectiles.filter(p => !p.dead);
+      this.checkCombat();
+
+      if (this.timer <= 0) {
+        // タイムアップ：HP多い方の勝ち
+        this.timer = 0;
+        const w = this.p1.hp === this.p2.hp ? -1 : (this.p1.hp > this.p2.hp ? 0 : 1);
+        if (w === -1) { this.wins[0]++; this.wins[1]++; }
+        else this.wins[w]++;
+        this.state = "roundEnd";
+        this.banner = w === -1 ? "DRAW" : (w === 0 ? "あなたの勝ち！" : "CPUの勝ち");
+        this.bannerT = 2.6;
+      }
+    } else if (this.state === "roundEnd") {
+      this.bannerT -= dt;
+      if (this.koTarget) this.koTarget.koTimer += dt;
+      this.p1.update(sdt, this.p2, this); this.p2.update(sdt, this.p1, this);
+      for (const pr of this.projectiles) pr.update(sdt);
+      this.projectiles = this.projectiles.filter(p => !p.dead);
+      if (this.bannerT <= 0) {
+        if (this.wins[0] >= 2 || this.wins[1] >= 2) {
+          this.state = "matchEnd";
+          this.banner = this.wins[0] >= 2 ? "YOU WIN!" : "YOU LOSE";
+          this.bannerT = 999;
+          Audio_.round();
+        } else { this.round++; this.startRound(); }
+      }
+    }
+
+    this.fx.update(sdt);
+    if (this.shake > 0) this.shake -= dt * 60;
+  }
+
+  /* ---- HUD ---- */
+  drawBar(ctx, x, y, w, h, ratio, color, right) {
+    ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
+    ctx.fillStyle = "#2a2030"; ctx.fillRect(x, y, w, h);
+    const bw = w * Math.max(0, Math.min(1, ratio));
+    const g = ctx.createLinearGradient(x, y, x, y + h);
+    g.addColorStop(0, shade(color, .25)); g.addColorStop(1, color);
+    ctx.fillStyle = g;
+    if (right) ctx.fillRect(x + w - bw, y, bw, h); else ctx.fillRect(x, y, bw, h);
+    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+  }
+  drawHUD(ctx) {
+    const bw = 480, bh = 26, my = 30;
+    this.drawBar(ctx, 40, my, bw, bh, this.p1.hp / 100, "#39d353", false);
+    this.drawBar(ctx, W - 40 - bw, my, bw, bh, this.p2.hp / 100, "#ff4d4d", true);
+    // メーター
+    this.drawBar(ctx, 40, my + bh + 8, bw * 0.7, 10, this.p1.meter / MAX_METER, "#ffd23d", false);
+    this.drawBar(ctx, W - 40 - bw * 0.7, my + bh + 8, bw * 0.7, 10, this.p2.meter / MAX_METER, "#ffd23d", true);
+    // 次に出る技（ループ位置）
+    ctx.font = "bold 15px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#bcd6ff";
+    ctx.fillText("NEXT ▶ " + NORMALS[this.p1.comboIndex % NORMALS.length].name, 42, my + bh + 36);
+    // 名前
+    ctx.fillStyle = "#fff"; ctx.font = "bold 20px system-ui"; ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left"; ctx.fillText(this.p1.name, 42, my - 8);
+    ctx.textAlign = "right"; ctx.fillText(this.p2.name, W - 42, my - 8);
+    // タイマー
+    ctx.textAlign = "center"; ctx.font = "bold 40px system-ui";
+    ctx.fillStyle = this.timer < 11 ? "#ff6b6b" : "#fff";
+    ctx.fillText(Math.ceil(this.timer), W / 2, my + 38);
+    // ラウンドランプ
+    for (let i = 0; i < 2; i++) {
+      ctx.fillStyle = this.wins[0] > i ? "#ffd23d" : "rgba(255,255,255,.2)";
+      ctx.beginPath(); ctx.arc(W / 2 - 22 - i * 18, my + 4, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = this.wins[1] > i ? "#ffd23d" : "rgba(255,255,255,.2)";
+      ctx.beginPath(); ctx.arc(W / 2 + 22 + i * 18, my + 4, 6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  drawBanner(ctx) {
+    if (this.bannerT <= 0 && this.state !== "matchEnd") return;
+    if (!this.banner) return;
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const big = this.state === "matchEnd";
+    const sz = big ? 90 : 64;
+    ctx.font = `900 ${sz}px system-ui`;
+    const pulse = 1 + Math.sin(this.t * 6) * 0.04;
+    ctx.translate(W / 2, big ? H / 2 - 40 : H * 0.32); ctx.scale(pulse, pulse);
+    ctx.lineWidth = 8; ctx.strokeStyle = "#10081a"; ctx.strokeText(this.banner, 0, 0);
+    const g = ctx.createLinearGradient(0, -sz / 2, 0, sz / 2);
+    g.addColorStop(0, "#fff7c2"); g.addColorStop(1, "#ffb33d");
+    ctx.fillStyle = g; ctx.fillText(this.banner, 0, 0);
+    ctx.restore();
+  }
+  drawTitle(ctx) {
+    ctx.save(); ctx.textAlign = "center";
+    ctx.font = "900 110px system-ui";
+    ctx.lineWidth = 10; ctx.strokeStyle = "#10081a";
+    ctx.strokeText("NEON FIST", W / 2, H * 0.34);
+    const g = ctx.createLinearGradient(0, H * 0.34 - 60, 0, H * 0.34 + 30);
+    g.addColorStop(0, "#9fe8ff"); g.addColorStop(0.5, "#5aa6ff"); g.addColorStop(1, "#ff5bd0");
+    ctx.fillStyle = g; ctx.fillText("NEON FIST", W / 2, H * 0.34);
+    ctx.font = "bold 26px system-ui"; ctx.fillStyle = "#fff";
+    const blink = Math.sin(this.t * 4) > -0.3;
+    if (blink) ctx.fillText("Press ENTER to Fight", W / 2, H * 0.52);
+    ctx.restore();
+  }
+
+  draw(ctx) {
+    let ox = 0, oy = 0;
+    if (this.shake > 0) { ox = (Math.random() - 0.5) * this.shake; oy = (Math.random() - 0.5) * this.shake; }
+    ctx.save();
+    ctx.clearRect(0, 0, W, H);
+    ctx.translate(ox, oy);
+    const camX = (this.p1.x + this.p2.x) / 2 - W / 2;
+    Stage.draw(ctx, this.t, camX);
+
+    if (this.state === "title") { this.drawTitle(ctx); ctx.restore(); return; }
+
+    // ファイター
+    this.p2.draw(ctx); this.p1.draw(ctx);
+    for (const pr of this.projectiles) pr.draw(ctx);
+    this.fx.draw(ctx);
+
+    // 画面フラッシュ（必殺技ヒットの「バーン」）— カメラ揺れに乗せて全面
+    if (this.flash > 0) {
+      const a = Math.min(1, this.flash / Math.max(0.001, this.flashMax));
+      ctx.save();
+      ctx.globalAlpha = a * 0.9;
+      const fg = ctx.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, W * 0.7);
+      fg.addColorStop(0, "#ffffff");
+      fg.addColorStop(0.5, this.flashColor || "#ffffff");
+      fg.addColorStop(1, this.flashColor || "#ffffff");
+      ctx.fillStyle = fg; ctx.fillRect(-40, -40, W + 80, H + 80);
+      ctx.restore();
+    }
+
+    this.drawHUD(ctx);
+    this.drawBanner(ctx);
+    if (this.state === "matchEnd") {
+      ctx.save(); ctx.textAlign = "center"; ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
+      if (Math.sin(this.t * 4) > -0.3) ctx.fillText("Press ENTER", W / 2, H / 2 + 70);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+}
+
+/* =====================================================================
+   MAIN LOOP（固定タイムステップ）
+   ===================================================================== */
+const game = new Game();
+let last = performance.now(), acc = 0;
+const STEP = 1 / 60;
+function frame(now) {
+  let dt = (now - last) / 1000; last = now;
+  if (dt > 0.25) dt = 0.25;
+  acc += dt;
+  while (acc >= STEP) { game.update(STEP); acc -= STEP; }
+  game.draw(ctx);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
