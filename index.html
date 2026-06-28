@@ -687,13 +687,26 @@ class Fighter {
   takeHit(move, fromDir, game) {
     if (this.state === "ko" || this.state === "knockdown") return;  // ダウン中は追撃を受けない
     let dmg = move.dmg; const isUlt = !!move.projectile;
-    if (this.blocking && !isUlt) {
-      const chip = Math.max(1, Math.round(dmg * 0.18));
-      this.hp -= chip; this.blockstun = 0.22; this.vx += fromDir * 120;
-      this.meter = Math.min(MAX_METER, this.meter + 4);
+    if (this.blocking) {
+      // 必殺技もガード可能：通常より削りが大きく、大きく押し戻される（こらえる）
+      const chip = isUlt ? Math.max(2, Math.round(dmg * 0.30)) : Math.max(1, Math.round(dmg * 0.18));
+      this.hp -= chip;
+      this.blockstun = isUlt ? 0.5 : 0.22;
+      this.vx += fromDir * (isUlt ? 380 : 120);
+      this.meter = Math.min(MAX_METER, this.meter + (isUlt ? 10 : 4));
       this.hitCombo = 0;
-      Audio_.block(); game.fx.spark(this.x, this.y - 110, fromDir, "#bcd6ff", 8);
-      game.showCallout("GUARD", "#bcd6ff");
+      Audio_.block();
+      game.fx.spark(this.x, this.y - 110, fromDir, "#bcd6ff", isUlt ? 22 : 8);
+      if (isUlt) {
+        // ガード成功の手応え（シールド衝撃波＋軽い揺れ・スロー）
+        game.fx.shock(this.x, this.y - 110, "#bcd6ff");
+        game.fx.ring(this.x, this.y - 110, "#dff0ff");
+        game.shake = Math.max(game.shake, 16);
+        game.setSlow(0.18, 0.32);
+        game.showCallout("GUARD!", "#9fe8ff");
+      } else {
+        game.showCallout("GUARD", "#bcd6ff");
+      }
       if (this.hp <= 0) this._ko(game, fromDir, false);
       return;
     }
@@ -935,8 +948,12 @@ class Fighter {
     if (this.canAct()) {
       if (this.state === "walk" || this.state === "block") this.state = "idle";
       const toOpp = Math.sign(opp.x - this.x) || 1;
+      // 向かってくる相手の飛び道具（必殺技）が近いか
+      const incomingProj = !!(game && game.projectiles && game.projectiles.some(pr =>
+        pr.owner === opp && !pr.dead && Math.sign(pr.vx) === -toOpp && Math.abs(pr.x - this.x) < 420));
       if (cmd !== 0) {
-        if (cmd === -toOpp && opp.state === "attack") { this.blocking = true; this.state = "block"; }
+        // 相手の攻撃中、または飛び道具が来ている時に逆方向＝ガード
+        if (cmd === -toOpp && (opp.state === "attack" || incomingProj)) { this.blocking = true; this.state = "block"; }
         else { this.vx = cmd * 440; this.state = "walk"; this.walkPhase += 0.4; }
       }
     }
@@ -2125,11 +2142,15 @@ class Game {
       const def = pr.owner === this.p1 ? this.p2 : this.p1;
       const hitting = this.overlap(pr.box(), def.hurtBox());
       if (!pr.hasHit && hitting) {
-        pr.hasHit = true;               // ダメージは1回のみ（dead にしない＝貫通）
-        pr.pierced = true; pr.vx *= 1.3; // 突き抜けて加速
+        pr.hasHit = true;
+        const guarded = def.blocking;
+        if (guarded) { pr.dead = true; }            // ガードで受け止める（貫通しない）
+        else { pr.pierced = true; pr.vx *= 1.3; }   // 無防備なら貫通して加速
         def.takeHit({ dmg: ULTIMATE.dmg, kb: 880, up: -300, projectile: true }, pr.dir, this);
-        this.fx.megashock(pr.x, pr.y);
-        this.fx.spark(pr.x, pr.y, pr.dir, "#aee6ff", 50);
+        if (!guarded) {                              // 直撃時のみ特大エフェクト
+          this.fx.megashock(pr.x, pr.y);
+          this.fx.spark(pr.x, pr.y, pr.dir, "#aee6ff", 50);
+        }
       } else if (pr.hasHit && hitting) {
         // 貫通中：波に押し込まれて一緒に運ばれる＋火花
         def.vx += pr.dir * 1400 / 60;
