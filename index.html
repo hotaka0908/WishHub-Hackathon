@@ -1219,16 +1219,28 @@ class Projectile {
     this.x += this.vx * dt; this.phase += dt * 16; this.spin += dt * 5; this.life -= dt;
     // 残像の記録
     this.trail.push({ x: this.x, y: this.y, r: this.r }); if (this.trail.length > 14) this.trail.shift();
-    // 進行中の地響き＆火花を撒く
+    // 進行中の地響き＆火花を撒く（貫通後はさらに激しく）
     if (this.game) {
-      this.game.shake = Math.max(this.game.shake, 7);
+      this.game.shake = Math.max(this.game.shake, this.pierced ? 11 : 7);
       this.emit -= dt;
       if (this.emit <= 0) {
-        this.emit = 0.02;
-        this.game.fx.spark(this.x - this.dir * this.r * 0.7, this.y + (Math.random() - 0.5) * this.r * 1.4, -this.dir, "#bfe8ff", 3);
+        this.emit = this.pierced ? 0.012 : 0.02;
+        this.game.fx.spark(this.x - this.dir * this.r * 0.7, this.y + (Math.random() - 0.5) * this.r * 1.4, -this.dir, "#bfe8ff", this.pierced ? 5 : 3);
       }
     }
-    if (this.life <= 0 || this.x < FLOOR_MIN - 60 || this.x > FLOOR_MAX + 60) this.dead = true;
+    const offEdge = this.x < FLOOR_MIN - 60 || this.x > FLOOR_MAX + 60;
+    if (this.life <= 0 || offEdge) {
+      this.dead = true;
+      // 画面端へ突き抜けた瞬間の爆発フィナーレ
+      if (this.pierced && offEdge && this.game) {
+        const ex = Math.max(40, Math.min(W - 40, this.x));
+        this.game.fx.megashock(ex, this.y);
+        this.game.fx.burst(ex, this.y, "#ffffff");
+        this.game.fx.blast(ex, this.y, "#cde0ff", 40, 1.5);
+        this.game.shake = Math.max(this.game.shake, 26);
+        this.game.flash = Math.max(this.game.flash, 0.22); this.game.flashMax = Math.max(this.game.flashMax, 0.22);
+      }
+    }
   }
   // 当たり判定は見た目よりやや小さめ＆縦長（波のうねり）
   box() { const w = this.r * 1.4, h = this.r * 2.2; return { x: this.x - w / 2, y: this.y - h / 2, w, h }; }
@@ -1821,15 +1833,21 @@ class Game {
         }
       }
     }
-    // 飛び道具
+    // 飛び道具（貫通：敵を突き抜けて飛び続ける）
     for (const pr of this.projectiles) {
-      if (pr.dead || pr.hasHit) continue;
+      if (pr.dead) continue;
       const def = pr.owner === this.p1 ? this.p2 : this.p1;
-      if (this.overlap(pr.box(), def.hurtBox())) {
-        pr.hasHit = true; pr.dead = true;
-        def.takeHit({ dmg: ULTIMATE.dmg, kb: 640, up: -230, projectile: true }, pr.dir, this);
+      const hitting = this.overlap(pr.box(), def.hurtBox());
+      if (!pr.hasHit && hitting) {
+        pr.hasHit = true;               // ダメージは1回のみ（dead にしない＝貫通）
+        pr.pierced = true; pr.vx *= 1.3; // 突き抜けて加速
+        def.takeHit({ dmg: ULTIMATE.dmg, kb: 760, up: -260, projectile: true }, pr.dir, this);
         this.fx.megashock(pr.x, pr.y);
-        this.fx.spark(pr.x, pr.y, pr.dir, "#aee6ff", 40);
+        this.fx.spark(pr.x, pr.y, pr.dir, "#aee6ff", 50);
+      } else if (pr.hasHit && hitting) {
+        // 貫通中：波に押し込まれて一緒に運ばれる＋火花
+        def.vx += pr.dir * 1400 / 60;
+        if (Math.random() < 0.6) this.fx.spark(def.x, def.y - 110 + def.airY, pr.dir, "#cfeaff", 4);
       }
     }
     // 体の押し合い（吹っ飛び/ダウン中は押し合わない）
@@ -2067,6 +2085,109 @@ class Game {
 }
 
 /* =====================================================================
+   NETPLAY — WebRTC(P2P) 決定論ロックステップ（入力遅延方式）
+     両端末が同一シミュレーションを並走し、各フレームの入力だけを交換する。
+     入力遅延 D フレーム分の猶予で相手入力の到着を待つ（届かなければ一時停止）。
+   ===================================================================== */
+const Net = (() => {
+  const NS = "neonfist-v1-";          // PeerID 名前空間（公開ブローカでの衝突回避）
+  const D = 3;                        // 入力遅延（フレーム）。大きいほど安定/反応は鈍る
+  const MAX_CATCHUP = 8;              // 1描画フレームで進める最大シムフレーム数
+  let peer = null, conn = null, role = null;
+  let connected = false, started = false;
+  let sendFrame = 0, simFrame = 0;
+  const localIn = new Map(), remoteIn = new Map();
+  let cb = { onStatus() {}, onStart() {}, onClose() {} };
+
+  function init(callbacks) { cb = Object.assign(cb, callbacks); }
+  function genCode() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let s = ""; for (let i = 0; i < 4; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
+  // 入力エンコード：move(-1,0,1)→0..2、attackビット
+  function enc(inp) { return (inp.move + 1) | (inp.attack ? 4 : 0); }
+  function dec(v) { return { move: (v & 3) - 1, attack: (v & 4) !== 0 }; }
+  const NEUTRAL = enc({ move: 0, attack: false });
+
+  function host() {
+    cleanup();
+    role = "host";
+    const code = genCode();
+    peer = new Peer(NS + code, { debug: 1 });
+    peer.on("open", () => cb.onStatus({ text: "部屋コードを相手に伝えてください", code, waiting: true }));
+    peer.on("connection", (c) => { conn = c; bindConn(); });
+    peer.on("error", (e) => cb.onStatus({ text: "接続エラー: " + e.type }));
+    return code;
+  }
+  function join(code) {
+    cleanup();
+    role = "guest";
+    code = (code || "").trim().toUpperCase();
+    if (code.length < 4) { cb.onStatus({ text: "4文字の部屋コードを入力してください" }); return; }
+    peer = new Peer(NS + "g-" + genCode(), { debug: 1 });
+    peer.on("open", () => {
+      cb.onStatus({ text: "接続中…" });
+      conn = peer.connect(NS + code, { reliable: true });
+      bindConn();
+    });
+    peer.on("error", (e) => cb.onStatus({ text: "接続エラー: " + e.type + "（コードを確認）" }));
+  }
+  function bindConn() {
+    conn.on("open", () => {
+      connected = true;
+      cb.onStatus({ text: role === "host" ? "接続完了！『対戦開始』を押してください" : "接続完了！ホストの開始を待っています…",
+                    connected: true, canStart: role === "host" });
+    });
+    conn.on("data", onData);
+    conn.on("close", () => { if (started || connected) cb.onClose("相手が切断しました"); reset(); });
+    conn.on("error", () => { cb.onClose("通信エラー"); reset(); });
+  }
+  function onData(msg) {
+    if (!msg) return;
+    if (msg.t === "start") { if (!started) _start(); }
+    else if (msg.t === "in") { remoteIn.set(msg.f, msg.i); }
+  }
+  function send(o) { if (conn && conn.open) conn.send(o); }
+
+  // ホストが開始（または再戦）。相手にも start を送り、両者で同一フレーム0から
+  function begin() { if (role === "host" && connected) { send({ t: "start" }); _start(); } }
+  function _start() {
+    started = true; sendFrame = 0; simFrame = 0; localIn.clear(); remoteIn.clear();
+    for (let f = 0; f < D; f++) { localIn.set(f, NEUTRAL); send({ t: "in", f, i: NEUTRAL }); }
+    sendFrame = D;
+    cb.onStart(role);
+  }
+
+  // 毎描画フレーム：steps 個の入力を採取・送信し、両入力が揃ったフレームを進める
+  function tick(steps) {
+    if (!started) return;
+    for (let s = 0; s < steps; s++) {
+      const i = enc(Input.sampleLocal());
+      localIn.set(sendFrame, i); send({ t: "in", f: sendFrame, i }); sendFrame++;
+    }
+    let n = 0;
+    while (n < MAX_CATCHUP && localIn.has(simFrame) && remoteIn.has(simFrame)) {
+      const li = dec(localIn.get(simFrame)), ri = dec(remoteIn.get(simFrame));
+      const in1 = role === "host" ? li : ri;   // P1=ホスト側
+      const in2 = role === "host" ? ri : li;   // P2=ゲスト側
+      game.setOnlineInputs(in1, in2);
+      game.update(STEP);
+      localIn.delete(simFrame); remoteIn.delete(simFrame);
+      simFrame++; n++;
+    }
+  }
+
+  function leave() { send({ t: "bye" }); reset(); }
+  function reset() { started = false; connected = false; localIn.clear(); remoteIn.clear(); }
+  function cleanup() { reset(); if (conn) { try { conn.close(); } catch (e) {} conn = null; }
+    if (peer) { try { peer.destroy(); } catch (e) {} peer = null; } }
+
+  return { init, host, join, begin, tick, leave, cleanup,
+           isStarted: () => started, isConnected: () => connected, getRole: () => role };
+})();
+
+/* =====================================================================
    MAIN LOOP（固定タイムステップ）
    ===================================================================== */
 const game = new Game();
@@ -2076,11 +2197,71 @@ function frame(now) {
   let dt = (now - last) / 1000; last = now;
   if (dt > 0.25) dt = 0.25;
   acc += dt;
-  while (acc >= STEP) { game.update(STEP); acc -= STEP; }
+  let steps = 0;
+  while (acc >= STEP) { steps++; acc -= STEP; }
+  if (game.online) {
+    // オンライン：シム進行は Net（ロックステップ）が駆動。未開始時は背景だけ進める
+    if (Net.isStarted()) Net.tick(steps);
+    else game.t += steps * STEP;
+  } else {
+    for (let i = 0; i < steps; i++) game.update(STEP);
+  }
   game.draw(ctx);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+/* =====================================================================
+   LOBBY UI — オンライン対戦のDOM配線
+   ===================================================================== */
+const $ = (id) => document.getElementById(id);
+const lobbyEl = $("lobby"), lobbyHome = $("lobbyHome"), lobbyStatus = $("lobbyStatus");
+const statusText = $("statusText"), roomCodeEl = $("roomCode"), btnStart = $("btnStart");
+const rematchEl = $("rematch"), btnRematch = $("btnRematch"), rematchText = $("rematchText");
+
+Net.init({
+  onStatus(s) {
+    showStatusView();
+    statusText.textContent = s.text || "";
+    if (s.code) { roomCodeEl.textContent = s.code; roomCodeEl.classList.remove("hidden"); }
+    btnStart.classList.toggle("hidden", !s.canStart);
+  },
+  onStart() { hide(lobbyEl); hide(rematchEl); game.startOnline(Net.getRole()); },
+  onClose(msg) {
+    hide(rematchEl);
+    if (game.online) game.endOnline();
+    // タイトルへ戻し、理由を表示
+    openLobby(); showStatusView();
+    statusText.textContent = msg || "切断しました";
+    roomCodeEl.classList.add("hidden"); btnStart.classList.add("hidden");
+  },
+});
+
+function show(el) { el.classList.remove("hidden"); }
+function hide(el) { el.classList.add("hidden"); }
+function showHomeView() { show(lobbyHome); hide(lobbyStatus); }
+function showStatusView() { hide(lobbyHome); show(lobbyStatus); }
+
+// タイトルの「オンライン対戦」から呼ばれる（関数宣言＝巻き上げで game から参照可）
+function openLobby() { game.online = true; show(lobbyEl); showHomeView();
+  roomCodeEl.classList.add("hidden"); btnStart.classList.add("hidden"); statusText.textContent = ""; }
+function closeLobbyToTitle() { Net.cleanup(); hide(lobbyEl); game.online = false; game.state = "title"; }
+
+// 試合終了（オンライン）：もう一度/退出 オーバーレイ
+function onMatchEndOnline(isHost) {
+  show(rematchEl);
+  rematchText.textContent = game.banner;     // YOU WIN! / YOU LOSE
+  btnRematch.classList.toggle("hidden", !isHost);  // 再戦の開始はホストのみ
+}
+
+$("btnHost").onclick = () => { Net.host(); };
+$("btnJoin").onclick = () => { Net.join($("codeInput").value); };
+$("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") Net.join($("codeInput").value); });
+$("btnBack").onclick = closeLobbyToTitle;
+$("btnCancel").onclick = closeLobbyToTitle;
+btnStart.onclick = () => { Net.begin(); };      // ホスト：対戦開始
+btnRematch.onclick = () => { hide(rematchEl); Net.begin(); };   // ホスト：再戦
+$("btnExit").onclick = () => { hide(rematchEl); Net.leave(); game.endOnline(); };
 </script>
 </body>
 </html>
