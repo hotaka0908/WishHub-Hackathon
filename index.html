@@ -449,14 +449,10 @@ const Input = (() => {
     if (key === "2") { digitPick = 1; e.preventDefault(); return; }
 
     if (mode === "online") {
-      // 移動：←→ / A D どちらでもOK（ローカルは1人なので寛容に）
-      if (code === "ArrowLeft" || code === "ArrowRight" || code === "KeyA" || code === "KeyD") {
-        keys[code] = true; e.preventDefault(); return;
-      }
+      // CPU戦と同じ操作：←→で移動、A〜Zの文字キー連打で攻撃
+      if (code === "ArrowLeft" || code === "ArrowRight") { keys[code] = true; e.preventDefault(); return; }
       if (e.repeat) return;
-      if (code === "KeyF" || code === "KeyG" || code === "KeyV" || code === "KeyJ" || code === "Space" || code === "Slash") {
-        e.preventDefault(); onlineAttack = true; return;
-      }
+      if (/^[a-zA-Z]$/.test(key) || code === "Space") { e.preventDefault(); onlineAttack = true; return; }
       return;
     }
 
@@ -494,7 +490,7 @@ const Input = (() => {
   function anyKeyCharging() { return false; }
   // オンライン：このフレームのローカル入力を1サンプル取り出す（攻撃エッジは消費）
   function sampleLocal() {
-    const move = ((keys["ArrowRight"] || keys["KeyD"]) ? 1 : 0) - ((keys["ArrowLeft"] || keys["KeyA"]) ? 1 : 0);
+    const move = (keys["ArrowRight"] ? 1 : 0) - (keys["ArrowLeft"] ? 1 : 0);
     const attack = onlineAttack; onlineAttack = false;
     return { move, attack };
   }
@@ -2277,19 +2273,20 @@ class Game {
     const mw = bw * 0.66, mh = 12, mty = my + bh + 9;
     this.drawMeter(ctx, 40, mty, mw, mh, this.p1.meter / MAX_METER, false);
     this.drawMeter(ctx, W - 40 - mw, mty, mw, mh, this.p2.meter / MAX_METER, true);
-    // 名前（グロー付き）
-    ctx.save(); ctx.font = "900 22px system-ui"; ctx.textBaseline = "alphabetic";
+    // 名前（メニューと同じ Russo One ＋グロー）
+    ctx.save(); ctx.font = "22px 'Russo One', system-ui"; ctx.textBaseline = "alphabetic";
     ctx.shadowColor = "rgba(120,180,255,.85)"; ctx.shadowBlur = 8; ctx.fillStyle = "#fff";
     ctx.textAlign = "left"; ctx.fillText(this.p1.name, 48, my - 9);
     ctx.textAlign = "right"; ctx.fillText(this.p2.name, W - 48, my - 9);
     ctx.restore();
-    // タイマー（縁取り＋グロー）
-    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    // タイマー（タイトルと同じネオンブロック書体）
     const tlow = this.timer < 11; const ts = Math.ceil(this.timer);
-    ctx.font = "900 46px system-ui";
-    ctx.shadowColor = tlow ? "rgba(255,60,60,.95)" : "rgba(120,180,255,.7)"; ctx.shadowBlur = 14;
-    ctx.lineWidth = 5; ctx.strokeStyle = "#0a0d1a"; ctx.strokeText(ts, W / 2, my + 40);
-    ctx.fillStyle = tlow ? "#ff5b5b" : "#fff"; ctx.fillText(ts, W / 2, my + 40);
+    const tp = tlow ? 1 + Math.sin(this.t * 10) * 0.08 : 1;   // 残りわずかで脈動
+    ctx.save(); ctx.translate(W / 2, my + 22); ctx.scale(tp, tp);
+    this.drawNeonText(ctx, String(ts), 0, 0, 54,
+      tlow ? "#ffd6d6" : "#ffffff",
+      tlow ? "#ff3535" : "#4aa6ff",
+      tlow ? "rgba(255,60,60,.85)" : "rgba(90,170,255,.7)", -0.1);
     ctx.restore();
     // ラウンドランプ（ダイヤ）
     for (let i = 0; i < 2; i++) {
@@ -2297,35 +2294,57 @@ class Game {
       this.drawLamp(ctx, W / 2 + 28 + i * 16, my + 6, this.wins[1] > i);
     }
   }
+  // タイトルと同じ質感のネオンブロック文字（3D押し出し＋グロー＋前傾スラント）
+  drawNeonText(ctx, text, x, y, size, c0, c1, glow, slant) {
+    ctx.save();
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.translate(x, y);
+    if (slant) ctx.transform(1, 0, slant, 1, 0, 0);          // 前傾スラント＝攻撃的
+    ctx.font = `${size}px 'Black Ops One', Impact, system-ui`;
+    ctx.lineJoin = "round";
+    // 3D押し出し（暗色を斜め下へ重ねる）
+    const off = size * 0.014;
+    const dep = Math.max(3, Math.round(size * 0.12));
+    ctx.fillStyle = "#0b0716";
+    for (let d = dep; d >= 1; d--) ctx.fillText(text, d * off, d * off);
+    // ネオンの外周グロー＋縁取り
+    ctx.shadowColor = glow || "rgba(90,170,255,.85)"; ctx.shadowBlur = size * 0.3;
+    ctx.lineWidth = Math.max(4, size * 0.09); ctx.strokeStyle = "#0a0a1c";
+    ctx.strokeText(text, 0, 0);
+    ctx.shadowBlur = 0;
+    // 本体グラデ
+    const g = ctx.createLinearGradient(0, -size * 0.55, 0, size * 0.55);
+    g.addColorStop(0, c0); g.addColorStop(1, c1);
+    ctx.fillStyle = g; ctx.fillText(text, 0, 0);
+    // 上部の鋭いハイライト
+    ctx.save(); ctx.beginPath(); ctx.rect(-W / 2, -size * 0.6, W, size * 0.32); ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,.28)"; ctx.fillText(text, 0, 0); ctx.restore();
+    ctx.restore();
+  }
   drawBanner(ctx) {
     if (this.bannerT <= 0 && this.state !== "matchEnd") return;
     if (!this.banner) return;
-    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.save();
     const big = this.state === "matchEnd";
     const isFight = this.banner === "FIGHT!";
-    const sz = big ? 90 : 64;
-    ctx.font = `900 ${sz}px system-ui`;
+    const sz = big ? 86 : 60;
     const pulse = 1 + Math.sin(this.t * 6) * 0.04;
-    // FIGHT! は控えめに小さくポップインするだけ
     const pop = isFight ? 1 + Math.max(0, this.bannerT - 0.74) / 0.16 * 0.18 : 1;
-    ctx.translate(W / 2, big ? H / 2 - 40 : H * 0.32); ctx.scale(pulse * pop, pulse * pop);
-    // 勝敗でカッコよく色分け
+    // 勝敗・状況で色分け（タイトルと同じネオン質感で描く）
     const b = this.banner;
-    let c0 = "#fff7c2", c1 = "#ffb33d", glow = null;
-    if (b.indexOf("WIN") >= 0) { c0 = "#eafff7"; c1 = "#33e6a0"; glow = "rgba(70,255,200,.6)"; }       // 勝ち＝エメラルド
-    else if (b.indexOf("LOSE") >= 0) { c0 = "#ffe0e0"; c1 = "#ff3d54"; glow = "rgba(255,70,90,.6)"; }   // 負け＝レッド
-    else if (b === "K.O.!") { c0 = "#fff2a0"; c1 = "#ff3636"; glow = "rgba(255,80,60,.6)"; }            // KO＝紅
-    else if (b === "DRAW" || b === "TIME UP") { c0 = "#eef3ff"; c1 = "#9fb0d8"; }
-    // 発光（マッチ終了・KO は強めに）
-    if (glow) { ctx.shadowColor = glow; ctx.shadowBlur = big ? 34 : 22; }
-    ctx.lineWidth = 9; ctx.strokeStyle = "#10081a"; ctx.strokeText(b, 0, 0);
-    ctx.shadowBlur = 0;
-    const g = ctx.createLinearGradient(0, -sz / 2, 0, sz / 2);
-    g.addColorStop(0, c0); g.addColorStop(1, c1);
-    ctx.fillStyle = g; ctx.fillText(b, 0, 0);
+    let c0 = "#fff7c2", c1 = "#ffb33d", glow = "rgba(255,150,40,.6)";
+    if (b.indexOf("WIN") >= 0) { c0 = "#eafff7"; c1 = "#33e6a0"; glow = "rgba(70,255,200,.65)"; }       // 勝ち＝エメラルド
+    else if (b.indexOf("LOSE") >= 0) { c0 = "#ffe0e0"; c1 = "#ff3d54"; glow = "rgba(255,70,90,.65)"; }   // 負け＝レッド
+    else if (b === "K.O.!") { c0 = "#fff2a0"; c1 = "#ff3636"; glow = "rgba(255,80,60,.7)"; }            // KO＝紅
+    else if (b === "DRAW" || b === "TIME UP") { c0 = "#eef3ff"; c1 = "#9fb0d8"; glow = "rgba(140,170,230,.5)"; }
+    else if (isFight) { c0 = "#fff2a0"; c1 = "#ff7a3d"; glow = "rgba(255,120,40,.7)"; }                  // FIGHT＝ホット
+    const x = W / 2, y = big ? H / 2 - 40 : H * 0.32;
+    ctx.translate(x, y); ctx.scale(pulse * pop, pulse * pop);
+    this.drawNeonText(ctx, b, 0, 0, sz, c0, c1, glow, -0.14);
     // マッチ終了は下にサブテキスト
     if (big) {
-      ctx.font = "bold 22px system-ui"; ctx.fillStyle = "rgba(255,255,255,.7)";
+      ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+      ctx.font = "20px 'Russo One', system-ui"; ctx.fillStyle = "rgba(255,255,255,.72)";
       ctx.fillText(b.indexOf("WIN") >= 0 ? "★ VICTORY ★" : "DEFEAT", 0, sz * 0.62);
     }
     ctx.restore();
