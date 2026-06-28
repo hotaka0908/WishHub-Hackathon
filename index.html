@@ -203,6 +203,18 @@ const Audio_ = (() => {
     o.connect(g); g.connect(dest || master);
     o.start(); o.stop(now() + dur + 0.02);
   }
+  // 破裂するような爽快なノイズバースト（パァン！）— 瞬時に立ち上がり、ハイパスが上がって抜けていく
+  function pop(vol, hpEnd, dur, dest) {
+    const src = ac.createBufferSource(); src.buffer = noiseBuf;
+    const hp = ac.createBiquadFilter(); hp.type = "highpass";
+    hp.frequency.setValueAtTime(280, now());
+    hp.frequency.exponentialRampToValueAtTime(Math.max(300, hpEnd), now() + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, now());                       // 瞬時アタック＝破裂感
+    g.gain.exponentialRampToValueAtTime(0.0006, now() + dur);
+    src.connect(hp); hp.connect(g); g.connect(dest || master);
+    src.start(); src.stop(now() + dur + 0.02);
+  }
 
   const api = {
     resume,
@@ -232,7 +244,10 @@ const Audio_ = (() => {
       // === 共通：当たりの芯＋サブブーム（低音はドライでタイトに） ===
       thump(215 + 50 * s, 50, 0.22 + 0.08 * s, 0.82 + 0.18 * s);   // ドスッ
       thump(68, 32, 0.42 + 0.1 * s, 0.5 + 0.12 * s);               // ドゥーン（サブブーム）
-      crunch(0.1 + 0.04 * s, 0.6 + 0.2 * s, (2600 + 300 * s) * p, 600, 14 + 9 * s, B); // バキッ
+      // 破裂する爽快なバースト（パァン！）＋ 弾けるクリック
+      pop(0.55 + 0.22 * s, (2600 + 1600 * s) * p, 0.13 + 0.04 * s, B);
+      tone("triangle", 1300 * p, 240, 0.05, 0.24, B);                                 // パッと弾けるクリック
+      crunch(0.09 + 0.03 * s, 0.42 + 0.16 * s, (2600 + 300 * s) * p, 650, 9 + 6 * s, B); // バキッ（歪み控えめ＝爽快に）
       tone("triangle", 2500 * p, 1500 * p, 0.14 + 0.04 * s, 0.1 + 0.03 * s, B);        // キィン
       // === 技ごとの味付け ===
       if (pose === "punch") {
