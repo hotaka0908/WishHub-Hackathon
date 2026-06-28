@@ -413,17 +413,22 @@ class Fighter {
     const fatal = this.hp <= 0;
 
     if (isUlt) {
-      // ===== 必殺技ヒット：超派手演出 =====
-      game.hitstop = Math.max(game.hitstop, 0.2);
-      game.slow = Math.max(game.slow, 0.55);
-      game.shake = Math.max(game.shake, 30);
-      game.flash = 0.36; game.flashMax = 0.36; game.flashColor = "#eaf6ff";
+      // ===== 必殺技ヒット：超派手・シネマ演出 =====
+      game.hitstop = Math.max(game.hitstop, 0.34);          // ガッと止める（インパクト）
+      game.setSlow(1.0, 0.14);                              // 深く長いスローモー
+      game.cineZoom(0.85, hx, hy);                          // 衝撃点へズーム
+      game.shake = Math.max(game.shake, 44);
+      game.flash = 0.55; game.flashMax = 0.55; game.flashColor = "#ffffff";
+      game.showCallout(fatal ? "FINISH!!" : "BREAK!", fatal ? "#ffd23d" : "#9fe8ff");
+      // 多重衝撃波（速さ違いで層になる）
+      game.fx.megashock(hx, hy);
+      game.fx.burst(hx, hy, "#ffffff");
       game.fx.burst(hx, hy, "#baf0ff");
       game.fx.speedlines(hx, hy, "#ffffff");
-      game.fx.shock(hx, hy, "#7fd6ff");
-      game.fx.ring(hx, hy, "#ffffff");
-      game.fx.blast(hx, hy, "#cde0ff", 40, 1.5);
-      game.fx.blast(hx, hy, "#ffd36b", 22, 1.1);
+      game.fx.speedlines(hx, hy, "#bfe8ff");
+      game.fx.blast(hx, hy, "#cde0ff", 70, 1.9);
+      game.fx.blast(hx, hy, "#ffffff", 30, 1.3);
+      game.fx.blast(hx, hy, "#ffd36b", 26, 1.1);
     } else if (knockdown) {
       // ===== 大技ヒット：しっかりした手応え =====
       game.hitstop = Math.max(game.hitstop, 0.12);
@@ -1073,30 +1078,67 @@ function drawFoot(ctx, knee, foot, f, col, edge) {
    PROJECTILE（必殺技の飛び道具）
    ===================================================================== */
 class Projectile {
-  constructor(owner) {
-    this.owner = owner;
+  constructor(owner, game) {
+    this.owner = owner; this.game = game;
     this.x = owner.x + owner.facing * 40;
     this.y = owner.y - 110;
     this.dir = owner.facing;
-    this.vx = 620 * this.dir;
-    this.r = 26; this.life = 2.2; this.dead = false; this.hasHit = false;
-    this.phase = 0;
+    this.vx = 660 * this.dir;
+    this.r = 38; this.life = 2.2; this.dead = false; this.hasHit = false;
+    this.phase = 0; this.trail = []; this.emit = 0;
   }
-  update(dt) { this.x += this.vx * dt; this.phase += dt * 16; this.life -= dt; if (this.life <= 0 || this.x < FLOOR_MIN - 40 || this.x > FLOOR_MAX + 40) this.dead = true; }
+  update(dt) {
+    this.x += this.vx * dt; this.phase += dt * 16; this.life -= dt;
+    // 残像の記録
+    this.trail.push({ x: this.x, y: this.y }); if (this.trail.length > 10) this.trail.shift();
+    // 飛びながら火花を撒く
+    this.emit -= dt;
+    if (this.game && this.emit <= 0) {
+      this.emit = 0.03;
+      this.game.fx.spark(this.x - this.dir * this.r * 0.6, this.y + (Math.random() - 0.5) * this.r, -this.dir, "#bfe8ff", 2);
+    }
+    if (this.life <= 0 || this.x < FLOOR_MIN - 40 || this.x > FLOOR_MAX + 40) this.dead = true;
+  }
   box() { return { x: this.x - this.r, y: this.y - this.r, w: this.r * 2, h: this.r * 2 }; }
   draw(ctx) {
     ctx.save();
-    const r = this.r + Math.sin(this.phase) * 3;
-    const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 1.8);
+    const r = this.r + Math.sin(this.phase) * 4;
+    // 後光の尾（残像）
+    for (let i = 0; i < this.trail.length; i++) {
+      const t = this.trail[i], a = (i / this.trail.length);
+      ctx.globalAlpha = a * 0.4;
+      const tg = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r * (0.6 + a));
+      tg.addColorStop(0, "rgba(150,230,255,.7)"); tg.addColorStop(1, "rgba(90,140,255,0)");
+      ctx.fillStyle = tg; ctx.beginPath(); ctx.arc(t.x, t.y, r * (0.6 + a), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // 外殻オーラ
+    const g = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r * 2.1);
     g.addColorStop(0, "rgba(255,255,255,1)");
-    g.addColorStop(0.3, "rgba(140,230,255,.95)");
-    g.addColorStop(0.7, "rgba(90,140,255,.6)");
+    g.addColorStop(0.25, "rgba(160,235,255,.98)");
+    g.addColorStop(0.6, "rgba(90,150,255,.6)");
     g.addColorStop(1, "rgba(90,140,255,0)");
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(this.x, this.y, r * 1.8, 0, Math.PI * 2); ctx.fill();
-    // 尾
-    ctx.globalAlpha = 0.5;
-    ctx.beginPath(); ctx.ellipse(this.x - this.dir * r, this.y, r * 1.6, r * 0.7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(this.x, this.y, r * 2.1, 0, Math.PI * 2); ctx.fill();
+    // 白熱コア
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(this.x, this.y, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    // 電撃アーク
+    ctx.strokeStyle = "rgba(200,245,255,.9)"; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    for (let k = 0; k < 4; k++) {
+      const a0 = this.phase * 1.3 + k * Math.PI / 2;
+      ctx.beginPath();
+      let px = this.x + Math.cos(a0) * r * 0.5, py = this.y + Math.sin(a0) * r * 0.5;
+      ctx.moveTo(px, py);
+      for (let s = 1; s <= 3; s++) {
+        const rr = r * (0.8 + s * 0.5);
+        const jit = Math.sin(this.phase * 7 + k * 3 + s) * r * 0.35;
+        px = this.x + Math.cos(a0) * rr - Math.sin(a0) * jit;
+        py = this.y + Math.sin(a0) * rr + Math.cos(a0) * jit;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
     ctx.restore();
   }
 }
@@ -1145,12 +1187,21 @@ class Effects {
   }
   ring(x, y, color) { this.rings.push({ x, y, r: 6, life: 0.25, max: 0.25, color, lw: 4 }); }
   shock(x, y, color) { this.rings.push({ x, y, r: 10, life: 0.4, max: 0.4, color, lw: 12 }); }
+  // 多重衝撃波（太さ・寿命を変えて層に）
+  megashock(x, y) {
+    this.rings.push({ x, y, r: 14, life: 0.55, max: 0.55, color: "#ffffff", lw: 18, delay: 0 });
+    this.rings.push({ x, y, r: 8, life: 0.6, max: 0.6, color: "#bfe8ff", lw: 10, delay: 0.06 });
+    this.rings.push({ x, y, r: 6, life: 0.7, max: 0.7, color: "#7fd6ff", lw: 6, delay: 0.14 });
+  }
   burst(x, y, color) { this.bursts.push({ x, y, r: 14, life: 0.3, max: 0.3, color: color || "#fff" }); }
   speedlines(x, y, color) { this.lines.push({ x, y, life: 0.28, max: 0.28, color: color || "#fff" }); }
   update(dt) {
     for (const p of this.parts) { p.vy += 900 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; }
     this.parts = this.parts.filter(p => p.life > 0);
-    for (const r of this.rings) { r.r += (r.lw > 6 ? 700 : 380) * dt; r.life -= dt; }
+    for (const r of this.rings) {
+      if (r.delay > 0) { r.delay -= dt; continue; }   // 多重衝撃波の時間差
+      r.r += (r.lw > 6 ? 700 : 380) * dt; r.life -= dt;
+    }
     this.rings = this.rings.filter(r => r.life > 0);
     for (const b of this.bursts) { b.r += 1500 * dt; b.life -= dt; }
     this.bursts = this.bursts.filter(b => b.life > 0);
@@ -1736,18 +1787,27 @@ class Game {
     if (this.shake > 0) { ox = (Math.random() - 0.5) * this.shake; oy = (Math.random() - 0.5) * this.shake; }
     ctx.save();
     ctx.clearRect(0, 0, W, H);
+
+    // --- ワールド層（カメラ揺れ＋シネマズーム） ---
+    ctx.save();
     ctx.translate(ox, oy);
+    if (this.cine > 0) {
+      const z = 1 + (this.cine / Math.max(0.001, this.cineMax)) * 0.34;
+      const fc = this.zoomFocus;
+      ctx.translate(fc.x, fc.y); ctx.scale(z, z); ctx.translate(-fc.x, -fc.y);
+    }
     const camX = (this.p1.x + this.p2.x) / 2 - W / 2;
     Stage.draw(ctx, this.t, camX);
 
-    if (this.state === "title") { this.drawTitle(ctx); ctx.restore(); return; }
+    if (this.state === "title") { this.drawTitle(ctx); ctx.restore(); ctx.restore(); return; }
 
     // ファイター
     this.p2.draw(ctx); this.p1.draw(ctx);
     for (const pr of this.projectiles) pr.draw(ctx);
     this.fx.draw(ctx);
+    ctx.restore();   // --- ワールド層おわり（フラッシュ/HUDはズームしない） ---
 
-    // 画面フラッシュ（必殺技ヒットの「バーン」）— カメラ揺れに乗せて全面
+    // 画面フラッシュ（必殺技ヒットの「バーン」）— 全面
     if (this.flash > 0) {
       const a = Math.min(1, this.flash / Math.max(0.001, this.flashMax));
       ctx.save();
