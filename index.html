@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>NEON FIST — 2D Fighting</title>
+<title>VIBE FIGHT — 2D Fighting</title>
 <style>
   :root { --bg:#05060d; }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -85,7 +85,7 @@
 <script>
 "use strict";
 /* =====================================================================
-   NEON FIST — 対CPU 2D格闘ゲーム  (single-file, no assets)
+   VIBE FIGHT — 対CPU 2D格闘ゲーム  (single-file, no assets)
    描画: Canvas2D 関節アニメ / 音: Web Audio 合成
    ===================================================================== */
 
@@ -2317,10 +2317,10 @@ class Game {
     ctx.save(); ctx.textAlign = "center";
     ctx.font = "900 110px system-ui";
     ctx.lineWidth = 10; ctx.strokeStyle = "#10081a";
-    ctx.strokeText("NEON FIST", W / 2, H * 0.30);
+    ctx.strokeText("VIBE FIGHT", W / 2, H * 0.30);
     const g = ctx.createLinearGradient(0, H * 0.30 - 60, 0, H * 0.30 + 30);
     g.addColorStop(0, "#9fe8ff"); g.addColorStop(0.5, "#5aa6ff"); g.addColorStop(1, "#ff5bd0");
-    ctx.fillStyle = g; ctx.fillText("NEON FIST", W / 2, H * 0.30);
+    ctx.fillStyle = g; ctx.fillText("VIBE FIGHT", W / 2, H * 0.30);
 
     // モード選択メニュー
     const opts = [
