@@ -8,78 +8,52 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Russo+One&family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --cyan:#4aa6ff; --mag:#ff4fc8; --gold:#ffd23d; --emerald:#33e6a0;
-    --ink:#070810; --paper:#e9eefb;
-  }
+  :root{ --cyan:#4aa6ff; --mag:#ff4fc8; --gold:#ffd23d; --emerald:#33e6a0; --paper:#e9eefb; }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
   body{
     background:radial-gradient(circle at 50% 22%, #161a33 0%, #07060d 62%, #050409 100%);
-    color:var(--paper); font-family:"Noto Sans JP",system-ui,sans-serif;
-    overflow:hidden; user-select:none;
+    color:var(--paper); font-family:"Noto Sans JP",system-ui,sans-serif; overflow:hidden; user-select:none;
   }
   #stage{position:fixed; inset:0; display:flex; align-items:center; justify-content:center;}
-  .slide{
-    position:absolute; inset:0; display:none;
-    flex-direction:column; align-items:center; justify-content:center;
-    padding:6vmin 9vmin; text-align:center; gap:2.4vmin;
-    opacity:0; transform:translateY(18px) scale(.99);
-    transition:opacity .45s ease, transform .45s ease;
-  }
+  .slide{position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center;
+    padding:7vmin; text-align:center; gap:4vmin; opacity:0; transform:translateY(18px); transition:opacity .45s, transform .45s;}
   .slide.on{display:flex; opacity:1; transform:none;}
-  /* 装飾 */
-  .scan{position:fixed;inset:0;pointer-events:none;
-    background:repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px);
-    mix-blend-mode:overlay;}
-  .glowbar{height:5px;width:42vmin;border-radius:99px;
-    background:linear-gradient(90deg,var(--cyan),var(--mag));
-    box-shadow:0 0 24px rgba(90,160,255,.7);}
-  .kicker{font-family:"Russo One";letter-spacing:.35em;font-size:2.1vmin;
-    color:#9fb4e0;text-transform:uppercase;}
-  .logo{font-family:"Black Ops One","Russo One",sans-serif;
-    font-size:14vmin;line-height:1;letter-spacing:.02em;
-    transform:skewX(-7deg);
+  .scan{position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px);mix-blend-mode:overlay;}
+  .glowbar{height:5px;width:42vmin;border-radius:99px;background:linear-gradient(90deg,var(--cyan),var(--mag));box-shadow:0 0 24px rgba(90,160,255,.7);}
+  .kicker{font-family:"Russo One";letter-spacing:.4em;font-size:2.2vmin;color:#9fb4e0;text-transform:uppercase;}
+  .logo{font-family:"Black Ops One",sans-serif;font-size:16vmin;line-height:1;transform:skewX(-7deg);
     background:linear-gradient(180deg,#fff 0%,#bdf0ff 26%,#4aa6ff 54%,#7b6bff 78%,#ff4fc8 100%);
     -webkit-background-clip:text;background-clip:text;color:transparent;
     text-shadow:0 0 38px rgba(90,160,255,.45); filter:drop-shadow(6px 7px 0 rgba(11,7,22,.85));}
-  h2{font-family:"Black Ops One",sans-serif;font-size:6.6vmin;line-height:1.05;
-    transform:skewX(-6deg);
+  h2{font-family:"Black Ops One",sans-serif;font-size:7.5vmin;line-height:1.05;transform:skewX(-6deg);
     background:linear-gradient(180deg,#fff,#bdf0ff 45%,var(--cyan));
-    -webkit-background-clip:text;background-clip:text;color:transparent;
-    filter:drop-shadow(4px 5px 0 rgba(11,7,22,.8));}
-  .sub{font-size:3vmin;color:#cdd8f5;font-weight:700;}
-  .tag{font-size:2.3vmin;color:#8ea4d8;max-width:80ch;line-height:1.7;}
-  /* カード一覧 */
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:2.4vmin;width:min(118vmin,94%);margin-top:1vmin;}
-  .grid.one{grid-template-columns:1fr;}
-  .card{background:linear-gradient(160deg,rgba(40,52,92,.55),rgba(16,18,34,.55));
-    border:1px solid rgba(120,160,255,.22);border-radius:16px;
-    padding:3vmin 3.4vmin;text-align:left;backdrop-filter:blur(4px);
-    box-shadow:0 10px 40px rgba(0,0,0,.4);}
-  .card h3{font-family:"Russo One";font-size:2.9vmin;margin-bottom:1vmin;color:#fff;
-    display:flex;align-items:center;gap:1.2vmin;}
-  .card p{font-size:2.1vmin;color:#b9c6ea;line-height:1.65;}
-  .ic{font-size:3.4vmin;filter:drop-shadow(0 0 8px rgba(90,160,255,.6));}
-  .pill{display:inline-block;font-family:"Russo One";font-size:1.9vmin;
-    padding:.5em 1.1em;border-radius:99px;margin:.5vmin;
+    -webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(4px 5px 0 rgba(11,7,22,.8));}
+  .lead{font-size:3.4vmin;color:#dbe5ff;font-weight:700;}
+  /* 手順（スライド2） */
+  .steps{display:flex;flex-direction:column;gap:3.4vmin;width:min(90vmin,92%);}
+  .step{display:flex;align-items:center;gap:3.5vmin;}
+  .step .k{font-family:"Russo One";font-size:4.6vmin;min-width:26vmin;text-align:right;color:#fff;}
+  .step .arrow{font-size:4vmin;color:var(--cyan);}
+  .step .v{font-size:4vmin;font-weight:900;text-align:left;}
+  /* 特徴カード（スライド3） */
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:3.4vmin;width:min(96vmin,92%);}
+  .card{background:linear-gradient(160deg,rgba(40,52,92,.5),rgba(16,18,34,.5));
+    border:1px solid rgba(120,160,255,.22);border-radius:18px;padding:4vmin 3vmin;
+    display:flex;flex-direction:column;align-items:center;gap:1.6vmin;}
+  .card .ic{font-size:7vmin;filter:drop-shadow(0 0 10px rgba(90,160,255,.6));}
+  .card .lbl{font-family:"Russo One";font-size:3vmin;color:#fff;}
+  /* 遊ぶ（スライド4） */
+  .pill{display:inline-block;font-family:"Russo One";font-size:2.8vmin;padding:.6em 1.4em;border-radius:99px;margin:1vmin;
     border:1px solid rgba(120,170,255,.4);color:#cfe0ff;background:rgba(60,90,170,.18);}
-  .big-url{font-family:"Russo One";font-size:4.2vmin;color:var(--gold);
-    text-shadow:0 0 26px rgba(255,210,60,.55);letter-spacing:.02em;}
-  .win{color:var(--emerald);} .mag{color:var(--mag);} .cy{color:var(--cyan);} .gd{color:var(--gold);}
-  /* フッター・ページャ */
-  footer{position:fixed;left:0;right:0;bottom:2.4vmin;display:flex;align-items:center;
-    justify-content:space-between;padding:0 4vmin;font-size:1.7vmin;color:#6c79a8;
-    font-family:"Russo One";}
+  .big-url{font-family:"Russo One";font-size:5.5vmin;color:var(--gold);text-shadow:0 0 26px rgba(255,210,60,.55);}
+  .cy{color:var(--cyan);} .mag{color:var(--mag);} .gd{color:var(--gold);} .win{color:var(--emerald);}
+  footer{position:fixed;left:0;right:0;bottom:2.4vmin;display:flex;align-items:center;justify-content:space-between;
+    padding:0 4vmin;font-size:1.7vmin;color:#6c79a8;font-family:"Russo One";}
   .dots{display:flex;gap:1.2vmin;}
-  .dot{width:1.5vmin;height:1.5vmin;border-radius:99px;background:rgba(160,180,230,.25);
-    transition:.3s;}
-  .dot.on{background:linear-gradient(90deg,var(--cyan),var(--mag));
-    box-shadow:0 0 12px rgba(120,160,255,.8);transform:scale(1.15);}
-  .hintkey{opacity:.8}
+  .dot{width:1.5vmin;height:1.5vmin;border-radius:99px;background:rgba(160,180,230,.25);transition:.3s;}
+  .dot.on{background:linear-gradient(90deg,var(--cyan),var(--mag));box-shadow:0 0 12px rgba(120,160,255,.8);transform:scale(1.15);}
   .num{font-size:2.1vmin;color:#fff;font-weight:900;}
-  .vs{font-family:"Black Ops One";font-size:2.4vmin;color:var(--mag);}
-  .row{display:flex;gap:1.2vmin;flex-wrap:wrap;justify-content:center;align-items:center;}
 </style>
 </head>
 <body>
@@ -87,83 +61,42 @@
 <div id="stage">
 
   <!-- 1. タイトル -->
-  <section class="slide" data-i="0">
-    <div class="kicker">2D ブラウザ対戦格闘ゲーム</div>
+  <section class="slide">
+    <div class="kicker">Browser Fighting Game</div>
     <div class="logo">VIBE&nbsp;FIGHT</div>
     <div class="glowbar"></div>
-    <div class="sub">連打で殴り合う、爽快ストリートファイト</div>
-    <div class="tag">インストール不要・ビルド不要。<span class="cy">1つの HTML</span> をブラウザで開くだけ。<br>
-      画像も音声ファイルも使わず、グラフィックとサウンドを<span class="mag">すべてコードで生成</span>しています。</div>
+    <div class="lead">連打で殴り合う、爽快 2D 格闘</div>
   </section>
 
   <!-- 2. 遊び方 -->
-  <section class="slide" data-i="1">
+  <section class="slide">
     <div class="kicker">How to Play</div>
-    <h2>シンプル操作で爽快コンボ</h2>
-    <div class="grid">
-      <div class="card">
-        <h3><span class="ic">🎮</span>操作はたった2つ</h3>
-        <p><b class="cy">← →</b> で移動、<b class="gd">A〜Z のどれでも連打</b>で攻撃。<br>
-        押すたびに5種の技が順番にループします。</p>
-      </div>
-      <div class="card">
-        <h3><span class="ic">👊</span>5連コンボ</h3>
-        <p>弱パンチ → 強パンチ → ジャンプキック → ダイナミックキック → <b class="mag">大車輪の叩きつけ</b>。</p>
-      </div>
-      <div class="card">
-        <h3><span class="ic">⚡</span>ゲージMAXで必殺技</h3>
-        <p>攻撃が当たるとゲージが溜まり、<b class="gd">満タンで必殺技「波動・烈」が自動発動</b>。敵を<b class="mag">貫通</b>する特大波動！</p>
-      </div>
-      <div class="card">
-        <h3><span class="ic">🏆</span>ルール</h3>
-        <p><b>3本勝負（2本先取）</b>・制限時間 <b>60秒</b>。<br>CPU戦と<b class="cy">オンライン対戦</b>（ルームコードでP2P接続）。</p>
-      </div>
+    <div class="steps">
+      <div class="step"><div class="k cy">← →</div><div class="arrow">▶</div><div class="v">移動</div></div>
+      <div class="step"><div class="k gd">A〜Z 連打</div><div class="arrow">▶</div><div class="v">攻撃</div></div>
+      <div class="step"><div class="k mag">ゲージMAX</div><div class="arrow">▶</div><div class="v">必殺技！</div></div>
     </div>
   </section>
 
-  <!-- 3. こだわり -->
-  <section class="slide" data-i="2">
-    <div class="kicker">Juice & Polish</div>
-    <h2>“手応え” への こだわり</h2>
+  <!-- 3. 見どころ -->
+  <section class="slide">
+    <div class="kicker">Highlights</div>
+    <h2>見どころ</h2>
     <div class="grid">
-      <div class="card">
-        <h3><span class="ic">🌃</span>荒廃した街のステージ</h3>
-        <p>崩れたビル群・立ち上る煙・舞う火の粉・ひび割れた路面をパララックス描画。</p>
-      </div>
-      <div class="card">
-        <h3><span class="ic">🥋</span>生きた関節アニメ</h3>
-        <p>腕を引いてから打つタメ動作、攻撃で手足が伸び、被弾側はのけぞり＆吹っ飛び。<br>
-        <b class="cy">細身スピード型</b> vs <b class="mag">パワー型</b>でキャラも差別化。</p>
-      </div>
-      <div class="card">
-        <h3><span class="ic">💥</span>映画的エフェクト</h3>
-        <p>ヒットストップ・スローモー・シネマズーム・多重衝撃波・スピードライン・ダメージ数字。</p>
-      </div>
-      <div class="card">
-        <h3><span class="ic">🔊</span>すべて合成サウンド</h3>
-        <p>当たりの芯・重低音・疾走BGM、さらにアナウンサー風 <b class="gd">「KO!」ボイス</b>や勝利ファンファーレも Web Audio で生成。</p>
-      </div>
+      <div class="card"><div class="ic">🌃</div><div class="lbl">荒廃した街</div></div>
+      <div class="card"><div class="ic">🥋</div><div class="lbl">ぬるぬる動く</div></div>
+      <div class="card"><div class="ic">💥</div><div class="lbl">爽快エフェクト</div></div>
+      <div class="card"><div class="ic">🔊</div><div class="lbl">全部コード生成の音</div></div>
     </div>
   </section>
 
-  <!-- 4. 技術 & 遊ぶ -->
-  <section class="slide" data-i="3">
-    <div class="kicker">Tech & Play</div>
-    <h2>アセット0・単一ファイル</h2>
-    <div class="row">
-      <span class="pill">HTML 1ファイル</span>
-      <span class="pill">Canvas 2D</span>
-      <span class="pill">Web Audio 合成</span>
-      <span class="pill">PeerJS (P2P/ロックステップ)</span>
-      <span class="pill">Vanilla JS</span>
-      <span class="pill">Vercel 自動デプロイ</span>
-    </div>
-    <div class="tag" style="margin-top:1vmin">ライブラリ最小・ビルドなし。<span class="cy">push すれば即本番反映</span>。<br>
-      画像/音声の外部アセットは <b class="gd">ゼロ</b> — 全部コードで描いて鳴らしています。</div>
-    <div class="glowbar" style="margin-top:1.5vmin"></div>
-    <div class="kicker" style="margin-top:1vmin">今すぐ遊ぶ</div>
+  <!-- 4. 遊ぶ -->
+  <section class="slide">
+    <div class="kicker">Play Now</div>
+    <h2>今すぐ遊ぶ</h2>
+    <div><span class="pill">CPU戦</span><span class="pill">オンライン対戦</span></div>
+    <div class="glowbar"></div>
     <div class="big-url">neon-fist.vercel.app</div>
-    <div class="tag"><span class="win">YOU WIN!</span> を目指して殴り合おう。</div>
   </section>
 
 </div>
@@ -171,7 +104,7 @@
 <footer>
   <div>VIBE FIGHT</div>
   <div class="dots" id="dots"></div>
-  <div class="hintkey">← → / クリック でめくる　<span id="page" class="num">1</span> / 4</div>
+  <div><span id="page" class="num">1</span> / 4</div>
 </footer>
 
 <script>
@@ -179,25 +112,19 @@
   const dotsWrap = document.getElementById("dots");
   const pageEl = document.getElementById("page");
   let i = 0;
-  slides.forEach((_, k) => {
-    const d = document.createElement("div"); d.className = "dot"; d.dataset.k = k;
-    d.onclick = () => go(k); dotsWrap.appendChild(d);
-  });
+  slides.forEach((_, k) => { const d = document.createElement("div"); d.className = "dot"; d.onclick = () => go(k); dotsWrap.appendChild(d); });
   const dots = [...document.querySelectorAll(".dot")];
-  function go(n) {
-    i = Math.max(0, Math.min(slides.length - 1, n));
-    slides.forEach((s, k) => s.classList.toggle("on", k === i));
-    dots.forEach((d, k) => d.classList.toggle("on", k === i));
-    pageEl.textContent = i + 1;
-  }
-  function next(d) { go(i + d); }
-  window.addEventListener("keydown", (e) => {
-    if (e.key === "ArrowRight" || e.key === " " || e.key === "Enter") { next(1); e.preventDefault(); }
-    else if (e.key === "ArrowLeft") { next(-1); e.preventDefault(); }
-    else if (e.key === "Home") go(0);
-    else if (e.key === "End") go(slides.length - 1);
+  function go(n){ i = Math.max(0, Math.min(slides.length-1, n));
+    slides.forEach((s,k)=>s.classList.toggle("on",k===i));
+    dots.forEach((d,k)=>d.classList.toggle("on",k===i));
+    pageEl.textContent = i+1; }
+  function next(d){ go(i+d); }
+  window.addEventListener("keydown",(e)=>{
+    if(e.key==="ArrowRight"||e.key===" "||e.key==="Enter"){next(1);e.preventDefault();}
+    else if(e.key==="ArrowLeft"){next(-1);e.preventDefault();}
+    else if(e.key==="Home")go(0); else if(e.key==="End")go(slides.length-1);
   });
-  window.addEventListener("click", (e) => { if (!e.target.closest(".dots")) next(1); });
+  window.addEventListener("click",(e)=>{ if(!e.target.closest(".dots")) next(1); });
   go(0);
 </script>
 </body>
