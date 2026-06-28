@@ -19,7 +19,9 @@
 </style>
 </head>
 <body>
-<div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div><script>
+<div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
+<div id="hint">← → 移動 ・ A〜Z 連打で攻撃（5種ループ）・ 攻撃が当たるとゲージが溜まり、満タンで必殺技が自動発動 ・ Enter 決定 / リスタート</div>
+<script>
 "use strict";
 /* =====================================================================
    NEON FIST — 対CPU 2D格闘ゲーム  (single-file, no assets)
@@ -138,12 +140,10 @@ const Audio_ = (() => {
 })();
 
 /* =====================================================================
-   INPUT — tap / double-tap / hold 判定
+   INPUT — A〜Z連打で通常技のみ（2回連続・長押しは廃止）
    ===================================================================== */
 const Input = (() => {
-  const DOUBLE = 220, HOLD = 340;
   const keys = {};                 // 押下状態
-  const ks = {};                   // 文字キーごとの状態
   const queue = [];                // プレイヤーの攻撃イベント
   let enterPressed = false;
 
@@ -158,42 +158,21 @@ const Input = (() => {
     if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = true; e.preventDefault(); return; }
     if (key === "Enter") { enterPressed = true; e.preventDefault(); return; }
     if (/^[a-zA-Z]$/.test(key)) {
-      const k = key.toLowerCase();
       e.preventDefault();
       if (e.repeat) return;
-      const s = ks[k] || (ks[k] = {});
-      const t = performance.now();
-      s.down = true; s.pressTime = t; s.holdFired = false; s.charged = false;
-      // 押した瞬間に発生（遅延なし）。同じキーを素早く2回押すと特別技。
-      if (s.lastTap && t - s.lastTap < DOUBLE) {
-        queue.push({ kind: "special", g: group(k) }); s.lastTap = 0;
-      } else {
-        queue.push({ kind: "normal", g: group(k) }); s.lastTap = t;
-      }
+      // 押した瞬間に通常技を発生（連打で5種ループ）。特別技・必殺技の手動入力はなし。
+      queue.push({ kind: "normal", g: group(key.toLowerCase()) });
     }
   });
   window.addEventListener("keyup", (e) => {
     const key = e.key;
     if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = false; return; }
-    if (/^[a-zA-Z]$/.test(key)) {
-      const s = ks[key.toLowerCase()]; if (s) s.down = false;
-    }
   });
   window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
 
-  function update() {
-    const t = performance.now();
-    for (const k in ks) {
-      const s = ks[k];
-      if (s.down && !s.holdFired) {
-        const held = t - s.pressTime;
-        if (!s.charged && held > HOLD * 0.45) { s.charged = true; Audio_.charge(); }
-        if (held >= HOLD) { s.holdFired = true; queue.push({ kind: "ultimate", g: group(k) }); }
-      }
-    }
-  }
+  function update() {}
   function moveDir() { return (keys["ArrowRight"] ? 1 : 0) - (keys["ArrowLeft"] ? 1 : 0); }
-  function anyKeyCharging() { for (const k in ks) if (ks[k].down && ks[k].charged && !ks[k].holdFired) return true; return false; }
+  function anyKeyCharging() { return false; }
   function takeEvents() { const q = queue.slice(); queue.length = 0; return q; }
   function consumeEnter() { const v = enterPressed; enterPressed = false; return v; }
   return { update, moveDir, takeEvents, consumeEnter, anyKeyCharging };
@@ -337,9 +316,7 @@ class Fighter {
     let move;
     const ci = this.comboIndex % NORMALS.length;   // 押すたびにループする現在位置
     if (kind === "ultimate") {
-      if (this.meter < ULTIMATE.cost) { // ゲージ不足 → 強攻撃で代替
-        move = SPECIALS[ci]; kind = "special";
-      } else { this.meter -= ULTIMATE.cost; move = ULTIMATE; }
+      this.meter = 0; move = ULTIMATE;        // 満タンで自動発動 → ゲージ0に戻る
     } else if (kind === "special") move = SPECIALS[ci];
     else { move = NORMALS[ci]; this.comboIndex++; }   // 通常攻撃だけがループを進める
 
@@ -531,6 +508,11 @@ class Fighter {
     // 向き（行動可能時のみ相手の方へ）
     if (this.canAct()) {
       const d = opp.x - this.x; if (Math.abs(d) > 6) this.facing = d > 0 ? 1 : -1;
+    }
+
+    // ゲージ満タン → 必殺技を自動発動（プレイヤー・CPU共通）
+    if (this.meter >= MAX_METER && game.state === "fight" && this.canAct()) {
+      this.buffer = null; this._start("ultimate");
     }
 
     // 入力バッファ消化
@@ -1079,9 +1061,17 @@ function drawStar(ctx, cx, cy, spikes, outer, inner) {
 }
 
 class Effects {
-  constructor() { this.parts = []; this.rings = []; this.bursts = []; this.lines = []; this.texts = []; }
+  constructor() { this.parts = []; this.rings = []; this.bursts = []; this.lines = []; this.texts = []; this.banners = []; }
   dmgNum(x, y, value, big) {
     this.texts.push({ x: x + (Math.random() - 0.5) * 16, y, vy: -150, value: Math.round(value), life: 0.85, max: 0.85, big });
+  }
+  // 画面中央のコール（FIRST ATTACK! / COUNTER! など）
+  callout(text, color) {
+    this.banners.push({ text, color: color || "#fff", x: W / 2, y: H * 0.30, vy: 0, life: 0.9, max: 0.9, size: 56, center: true });
+  }
+  // コンボ数の表示（キャラ頭上）
+  combo(n, color, x, y) {
+    this.banners.push({ text: n + " HITS", sub: true, color: color || "#ffd23d", x, y, vy: -46, life: 0.7, max: 0.7, size: 30 });
   }
   spark(x, y, dir, color, n) {
     for (let i = 0; i < n; i++) {
@@ -1113,6 +1103,8 @@ class Effects {
     this.lines = this.lines.filter(l => l.life > 0);
     for (const t of this.texts) { t.y += t.vy * dt; t.vy *= Math.pow(0.02, dt); t.life -= dt; }
     this.texts = this.texts.filter(t => t.life > 0);
+    for (const b of this.banners) { b.y += b.vy * dt; b.vy *= Math.pow(0.1, dt); b.life -= dt; }
+    this.banners = this.banners.filter(b => b.life > 0);
   }
   draw(ctx) {
     // 集中線
@@ -1161,6 +1153,20 @@ class Effects {
       ctx.lineWidth = 5; ctx.strokeStyle = "#2a0d0d"; ctx.strokeText(t.value, t.x, t.y);
       ctx.fillStyle = t.big ? "#ffd23d" : "#fff";
       ctx.fillText(t.value, t.x, t.y);
+      ctx.restore();
+    }
+    // コール / コンボ表示
+    for (const b of this.banners) {
+      const a = Math.max(0, b.life / b.max);
+      const pop = a > 0.75 ? 1 + (a - 0.75) * 2 : 1;       // 出現時に弾む
+      const sz = b.size * pop;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, a * 1.8);
+      ctx.font = "900 " + sz.toFixed(0) + "px system-ui";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = b.center ? 8 : 6; ctx.strokeStyle = "#15080a"; ctx.lineJoin = "round";
+      ctx.strokeText(b.text, b.x, b.y);
+      ctx.fillStyle = b.color; ctx.fillText(b.text, b.x, b.y);
       ctx.restore();
     }
   }
@@ -1408,6 +1414,13 @@ class Game {
     this.flash = 0; this.flashMax = 1; this.flashColor = "#ffffff";
     this.t = 0;
     this.koTarget = null;
+    this.firstHit = false;
+  }
+  // 手応えのコール / コンボ表示
+  showCallout(text, color) { this.fx.callout(text, color); }
+  showCombo(n, atkIdx, x, y) {
+    const col = atkIdx === 0 ? this.p1.colors.cloth : this.p2.colors.cloth;
+    this.fx.combo(n, col, x, y);
   }
   startMatch() {
     this.wins = [0, 0]; this.round = 1;
@@ -1418,6 +1431,7 @@ class Game {
   startRound() {
     this.p1.reset(1); this.p2.reset(-1);
     this.projectiles.length = 0; this.fx.parts.length = 0; this.fx.rings.length = 0;
+    this.fx.banners.length = 0; this.fx.texts.length = 0; this.firstHit = false;
     this.timer = 60; this.koTarget = null;
     this.state = "ready"; this.banner = "ROUND " + this.round; this.bannerT = 1.4;
     Audio_.round();
@@ -1454,20 +1468,17 @@ class Game {
       }
     }
 
+    // 通常技だけで戦う（必殺技はゲージ満タンで自動発動＝プレイヤーと同条件）
     if (a.timer <= 0) {
       a.timer = 0.18 + Math.random() * 0.35;
       if (dist > 320) { a.action = "approach"; a.moveDir = toYou; }
       else if (dist > 150) {
         const r = Math.random();
-        if (me.meter >= ULTIMATE.cost && r < 0.18) { a.action = "ultimate"; }
-        else if (r < 0.55) { a.action = "approach"; a.moveDir = toYou; }
-        else if (r < 0.72) { a.action = "special"; }
+        if (r < 0.6) { a.action = "approach"; a.moveDir = toYou; }
         else { a.action = "wait"; a.moveDir = (Math.random() < 0.5 ? -toYou : 0); }
       } else {
         const r = Math.random();
-        if (me.meter >= ULTIMATE.cost && r < 0.12) a.action = "ultimate";
-        else if (r < 0.30) a.action = "special";
-        else if (r < 0.80) a.action = "normal";
+        if (r < 0.72) a.action = "normal";
         else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.25; }
       }
     }
@@ -1478,8 +1489,6 @@ class Game {
     } else if (me.canAct()) {
       const g = Math.floor(Math.random() * 5);
       if (a.action === "normal") me.request("normal", g);
-      else if (a.action === "special") me.request("special", g);
-      else if (a.action === "ultimate") me.request("ultimate", g);
       a.action = "wait"; a.moveDir = 0; a.timer = 0.4 + Math.random() * 0.3;
     }
   }
@@ -1657,6 +1666,11 @@ class Game {
     ctx.font = "bold 26px system-ui"; ctx.fillStyle = "#fff";
     const blink = Math.sin(this.t * 4) > -0.3;
     if (blink) ctx.fillText("Press ENTER to Fight", W / 2, H * 0.52);
+    // 操作説明（新仕様）
+    ctx.font = "bold 20px system-ui"; ctx.fillStyle = "#9fb0d8";
+    ctx.fillText("← →  移動    A〜Z 連打  攻撃", W / 2, H * 0.62);
+    ctx.fillStyle = "#ffd23d";
+    ctx.fillText("ゲージ満タンで 必殺技が自動発動！", W / 2, H * 0.67);
     ctx.restore();
   }
 
