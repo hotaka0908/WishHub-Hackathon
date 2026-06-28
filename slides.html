@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Russo+One&family=Noto+Sans+JP:wght@400;700;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <style>
   :root{ --cyan:#4aa6ff; --mag:#ff4fc8; --gold:#ffd23d; --emerald:#33e6a0; --paper:#e9eefb; }
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -46,7 +47,10 @@
   /* 遊ぶ（スライド4） */
   .pill{display:inline-block;font-family:"Russo One";font-size:2.8vmin;padding:.6em 1.4em;border-radius:99px;margin:1vmin;
     border:1px solid rgba(120,170,255,.4);color:#cfe0ff;background:rgba(60,90,170,.18);}
-  .big-url{font-family:"Russo One";font-size:5.5vmin;color:var(--gold);text-shadow:0 0 26px rgba(255,210,60,.55);}
+  .big-url{font-family:"Russo One";font-size:4.4vmin;color:var(--gold);text-shadow:0 0 26px rgba(255,210,60,.55);}
+  .qr{background:#fff;padding:2.2vmin;border-radius:16px;box-shadow:0 0 44px rgba(90,160,255,.4);}
+  .qr svg{width:33vmin;height:33vmin;display:block;}
+  .qrcap{font-size:2vmin;color:#9fb4e0;font-family:"Russo One";}
   .cy{color:var(--cyan);} .mag{color:var(--mag);} .gd{color:var(--gold);} .win{color:var(--emerald);}
   footer{position:fixed;left:0;right:0;bottom:2.4vmin;display:flex;align-items:center;justify-content:space-between;
     padding:0 4vmin;font-size:1.7vmin;color:#6c79a8;font-family:"Russo One";}
@@ -94,8 +98,8 @@
   <section class="slide">
     <div class="kicker">Play Now</div>
     <h2>今すぐ遊ぶ</h2>
-    <div><span class="pill">CPU戦</span><span class="pill">オンライン対戦</span></div>
-    <div class="glowbar"></div>
+    <div class="qr" id="qr"></div>
+    <div class="qrcap">スマホで読み取ってプレイ 📱</div>
     <div class="big-url">neon-fist.vercel.app</div>
   </section>
 
@@ -125,6 +129,22 @@
     else if(e.key==="Home")go(0); else if(e.key==="End")go(slides.length-1);
   });
   window.addEventListener("click",(e)=>{ if(!e.target.closest(".dots")) next(1); });
+
+  // 対戦ゲームへ飛ぶ QR コードを生成
+  const PLAY_URL = "https://neon-fist.vercel.app/";
+  (function makeQR(){
+    const el = document.getElementById("qr");
+    try {
+      const qr = qrcode(0, "M"); qr.addData(PLAY_URL); qr.make();
+      el.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 0, scalable: true });
+    } catch (e) {
+      // ライブラリ未読込時は画像APIにフォールバック
+      el.innerHTML = '<img alt="QR" style="width:33vmin;height:33vmin;display:block" '
+        + 'src="https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=0&data='
+        + encodeURIComponent(PLAY_URL) + '">';
+    }
+  })();
+
   go(0);
 </script>
 </body>
