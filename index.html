@@ -228,6 +228,29 @@ const Audio_ = (() => {
     src.connect(bp); bp.connect(g); g.connect(dest || master);
     src.start(); src.stop(now() + dur + 0.02);
   }
+  // 簡易ボイス（母音フォルマント）— アナウンサー風の掛け声を合成
+  function voice(pitch0, pitch1, formants, dur, vol, dest) {
+    const src = ac.createOscillator(); src.type = "sawtooth";
+    src.frequency.setValueAtTime(pitch0, now());
+    src.frequency.exponentialRampToValueAtTime(Math.max(40, pitch1), now() + dur);
+    const lfo = ac.createOscillator(); const lfoG = ac.createGain();   // ビブラート
+    lfo.frequency.value = 15; lfoG.gain.value = pitch0 * 0.035;
+    lfo.connect(lfoG); lfoG.connect(src.frequency);
+    const out = ac.createGain();
+    out.gain.setValueAtTime(0.0001, now());
+    out.gain.exponentialRampToValueAtTime(vol, now() + 0.025);
+    out.gain.setValueAtTime(vol, now() + dur * 0.6);
+    out.gain.exponentialRampToValueAtTime(0.0008, now() + dur);
+    for (let i = 0; i < formants.length; i++) {
+      const bp = ac.createBiquadFilter(); bp.type = "bandpass";
+      bp.frequency.value = formants[i]; bp.Q.value = 7;
+      const fg = ac.createGain(); fg.gain.value = 1 - i * 0.18;
+      src.connect(bp); bp.connect(fg); fg.connect(out);
+    }
+    out.connect(dest || master);
+    src.start(); lfo.start();
+    src.stop(now() + dur + 0.03); lfo.stop(now() + dur + 0.03);
+  }
 
   const api = {
     resume,
@@ -288,9 +311,30 @@ const Audio_ = (() => {
     fire() { ensure(); tone("sine", 600, 160, 0.3, 0.22); noise(0.18, 0.2, 2200, 400); },
     ko() {
       ensure();
-      tone("sawtooth", 400, 60, 0.7, 0.35);
-      noise(0.6, 0.4, 3000, 200);
-      setTimeout(() => tone("square", 300, 50, 0.5, 0.25), 100);
+      // インパクト（ドガッ！）
+      thump(150, 38, 0.55, 1.0);
+      pop(0.55, 5200, 0.2);
+      noise(0.5, 0.35, 3000, 200);
+      tone("square", 900, 160, 0.22, 0.2);
+      // アナウンサー風「ケイ・オー！」（2連の母音バースト）
+      voice(440, 360, [520, 1700], 0.18, 0.55);                               // "KAY"
+      setTimeout(() => { if (ac) voice(540, 300, [360, 820, 2500], 0.42, 0.6); }, 165); // "OHHH!"
+      setTimeout(() => { if (ac) tone("sawtooth", 700, 90, 0.4, 0.28); }, 60);
+    },
+    // 勝利ファンファーレ＋勝ち名乗りボイス
+    victory() {
+      ensure();
+      const notes = [523, 659, 784, 1047]; // C E G C（明るい上昇）
+      notes.forEach((f, i) => setTimeout(() => { if (ac) { tone("square", f, f, 0.16, 0.2); tone("triangle", f, f, 0.28, 0.16); } }, i * 105));
+      setTimeout(() => { if (ac) { tone("square", 1047, 1047, 0.5, 0.24); tone("sawtooth", 784, 784, 0.5, 0.13); } }, 440);
+      setTimeout(() => { if (ac) voice(520, 600, [600, 1000, 2600], 0.4, 0.45); }, 180); // "WIN!"風
+    },
+    // 敗北ジングル（下降）
+    defeat() {
+      ensure();
+      const notes = [392, 330, 262, 196];
+      notes.forEach((f, i) => setTimeout(() => { if (ac) tone("triangle", f, f * 0.99, 0.3, 0.2); }, i * 130));
+      setTimeout(() => { if (ac) { tone("sawtooth", 180, 80, 0.7, 0.18); voice(260, 150, [400, 700], 0.5, 0.3); } }, 520);
     },
     round() { ensure(); tone("square", 520, 520, 0.12, 0.2); setTimeout(() => tone("square", 780, 780, 0.18, 0.22), 130); },
     startBGM() {
@@ -2091,7 +2135,10 @@ class Game {
           } else if (this.mode === "cpu") this.banner = this.wins[0] >= 2 ? "YOU WIN!" : "YOU LOSE";
           else this.banner = (this.wins[0] >= 2 ? "PLAYER 1" : "PLAYER 2") + " WINS!";
           this.bannerT = 999;
-          Audio_.round();
+          // 勝敗ジングル（勝った側には勝利ファンファーレ）
+          const youWonMatch = this.online ? ((this.netRole === "host") === (this.wins[0] >= 2))
+            : (this.mode === "cpu" ? this.wins[0] >= 2 : true);
+          if (youWonMatch) Audio_.victory(); else Audio_.defeat();
         } else { this.round++; this.startRound(); }
       }
     }
