@@ -710,6 +710,16 @@ class Fighter {
         this.vx += st * this.facing;
         if (m.dmg >= 14 || m.lunge) game.shake = Math.max(game.shake, 4);
       }
+      // 大車輪：叩きつけの着地で地面が砕ける（外しても重く見せる）
+      if (m.pose === "spin" && !a.slammed && a.t >= m.he) {
+        a.slammed = true;
+        const gx = this.x + this.facing * 34;
+        game.shake = Math.max(game.shake, 16);
+        game.fx.shock(gx, this.y - 4, "#b8a89a");
+        game.fx.ring(gx, this.y - 4, "#caa");
+        game.fx.spark(gx, this.y, -this.facing, "#9a8f86", 16);
+        game.fx.spark(gx, this.y, this.facing, "#9a8f86", 12);
+      }
       // 必殺技の発射（発動カットイン）
       if (m.projectile && !a.fired && a.t >= m.hs) {
         a.fired = true;
