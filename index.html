@@ -323,20 +323,35 @@ const Audio_ = (() => {
       // 締めの高音シャキーン（決着の輝き）
       setTimeout(() => { if (ac) { tone("square", 1568, 1568, 0.45, 0.13, B); tone("triangle", 2093, 2093, 0.7, 0.12, B); } }, 340);
     },
-    // 勝利ファンファーレ＋勝ち名乗りボイス
+    // 勝利ファンファーレ（短くきれいに作曲・試合終了後に再生）
     victory() {
-      ensure();
-      const notes = [523, 659, 784, 1047]; // C E G C（明るい上昇）
-      notes.forEach((f, i) => setTimeout(() => { if (ac) { tone("square", f, f, 0.16, 0.2); tone("triangle", f, f, 0.28, 0.16); } }, i * 105));
-      setTimeout(() => { if (ac) { tone("square", 1047, 1047, 0.5, 0.24); tone("sawtooth", 784, 784, 0.5, 0.13); } }, 440);
-      setTimeout(() => { if (ac) voice(520, 600, [600, 1000, 2600], 0.4, 0.45); }, 180); // "WIN!"風
+      ensure(); if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; }
+      const M = master;
+      const lead = (f, t, dur, vol) => setTimeout(() => { if (ac) { tone("square", f, f, dur, vol * 0.5, M); tone("triangle", f, f, dur * 1.1, vol * 0.65, M); } }, t);
+      const low = (f, t, dur, vol) => setTimeout(() => { if (ac) tone("triangle", f, f, dur, vol, M); }, t);
+      // 弾むタタッ・タッ・タァン↑（ド・ミ・ソ・ド）
+      lead(523, 0, 0.13, 0.3);
+      lead(659, 120, 0.13, 0.3);
+      lead(784, 240, 0.13, 0.3);
+      lead(1047, 360, 0.42, 0.34);
+      low(131, 0, 0.4, 0.22);
+      low(196, 360, 0.46, 0.22);
+      // 決めのメジャー和音（ジャーン！）＋低音キックで締め
+      const ct = 700;
+      setTimeout(() => { if (ac) thump(140, 50, 0.18, 0.6, M); }, ct);
+      [523, 659, 784, 1047].forEach(f => lead(f, ct, 0.95, 0.13));
+      low(131, ct, 0.95, 0.24);
+      // きらめき上昇アルペジオ（締めの輝き）
+      [1047, 1319, 1568, 2093].forEach((f, i) => setTimeout(() => { if (ac) tone("triangle", f, f, 0.4, 0.12, M); }, ct + 90 + i * 70));
     },
-    // 敗北ジングル（下降）
+    // 敗北ジングル（短い下降・試合終了後に再生）
     defeat() {
-      ensure();
-      const notes = [392, 330, 262, 196];
-      notes.forEach((f, i) => setTimeout(() => { if (ac) tone("triangle", f, f * 0.99, 0.3, 0.2); }, i * 130));
-      setTimeout(() => { if (ac) { tone("sawtooth", 180, 80, 0.7, 0.18); voice(260, 150, [400, 700], 0.5, 0.3); } }, 520);
+      ensure(); if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; }
+      const M = master;
+      const note = (f, t, dur, vol) => setTimeout(() => { if (ac) { tone("triangle", f, f * 0.995, dur, vol, M); tone("square", f, f, dur, vol * 0.3, M); } }, t);
+      [392, 330, 294, 220].forEach((f, i) => note(f, i * 165, 0.34, 0.2));
+      // 沈む低音で締め
+      setTimeout(() => { if (ac) { tone("sawtooth", 165, 70, 0.8, 0.16, M); thump(95, 40, 0.7, 0.4, M); } }, 680);
     },
     round() { ensure(); tone("square", 520, 520, 0.12, 0.2); setTimeout(() => tone("square", 780, 780, 0.18, 0.22), 130); },
     startBGM() {
