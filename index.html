@@ -2085,37 +2085,112 @@ class Game {
   }
 
   /* ---- HUD ---- */
-  drawBar(ctx, x, y, w, h, ratio, color, right) {
-    ctx.fillStyle = "rgba(0,0,0,.55)"; ctx.fillRect(x - 3, y - 3, w + 6, h + 6);
-    ctx.fillStyle = "#2a2030"; ctx.fillRect(x, y, w, h);
-    const bw = w * Math.max(0, Math.min(1, ratio));
+  // 斜めの格ゲー風ゲージ（光沢・先端グロー・ダメージ残像・目盛り対応）
+  drawBar(ctx, x, y, w, h, ratio, color, right, trail, seg) {
+    const sk = Math.min(16, h * 0.6);
+    const para = (px, py, pw, ph) => {
+      ctx.beginPath();
+      ctx.moveTo(px + sk, py); ctx.lineTo(px + pw + sk, py);
+      ctx.lineTo(px + pw, py + ph); ctx.lineTo(px, py + ph); ctx.closePath();
+    };
+    ctx.save();
+    // 外枠の影
+    para(x - 3, y - 3, w + 6, h + 6); ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fill();
+    // 溝（背景）
+    para(x, y, w, h); ctx.fillStyle = "#181420"; ctx.fill();
+    // 中身をクリップして描画
+    ctx.save(); para(x, y, w, h); ctx.clip();
+    const r = Math.max(0, Math.min(1, ratio));
+    const bw = w * r;
+    const bx = right ? x + w - bw : x;
+    // ダメージ残像トレイル（失ったHPがじわっと減る）
+    if (trail != null) {
+      const tw = w * Math.max(0, Math.min(1, trail));
+      ctx.fillStyle = "rgba(255,235,140,.55)";
+      if (right) ctx.fillRect(x + w - tw, y, tw, h); else ctx.fillRect(x, y, tw, h);
+    }
+    // 本体（縦グラデ＝立体感）
     const g = ctx.createLinearGradient(x, y, x, y + h);
-    g.addColorStop(0, shade(color, .25)); g.addColorStop(1, color);
-    ctx.fillStyle = g;
-    if (right) ctx.fillRect(x + w - bw, y, bw, h); else ctx.fillRect(x, y, bw, h);
-    ctx.strokeStyle = "rgba(255,255,255,.35)"; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+    g.addColorStop(0, shade(color, .55)); g.addColorStop(0.48, color);
+    g.addColorStop(0.52, shade(color, .1)); g.addColorStop(1, shade(color, -.25));
+    ctx.fillStyle = g; ctx.fillRect(bx, y, bw, h);
+    // 上部の光沢ハイライト
+    ctx.fillStyle = "rgba(255,255,255,.3)"; ctx.fillRect(bx, y + 2, bw, h * 0.3);
+    // セグメント目盛り（斜めに沿う）
+    if (seg) {
+      ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 1;
+      for (let s = 1; s < 10; s++) { const sx = x + w * s / 10; ctx.beginPath(); ctx.moveTo(sx + sk, y); ctx.lineTo(sx, y + h); ctx.stroke(); }
+    }
+    // 先端のリーディングエッジ（光る）
+    if (r > 0.002 && r < 0.998) {
+      const ex = right ? x + w - bw : x + bw;
+      ctx.fillStyle = "rgba(255,255,255,.9)"; ctx.fillRect(ex - 1.5, y, 3, h);
+    }
+    ctx.restore();
+    // フレーム線
+    para(x, y, w, h); ctx.strokeStyle = "rgba(170,205,255,.55)"; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.restore();
+  }
+  // スーパーゲージ（満タンで発光＋MAX表示）
+  drawMeter(ctx, x, y, w, h, ratio, right) {
+    const full = ratio >= 0.999;
+    if (full) {
+      const pul = 0.5 + 0.5 * Math.sin(this.t * 8);
+      ctx.save(); ctx.shadowColor = "rgba(255,210,60,.95)"; ctx.shadowBlur = 10 + pul * 14;
+    }
+    this.drawBar(ctx, x, y, w, h, ratio, full ? "#ffe24d" : "#ffae3d", right, null, true);
+    if (full) {
+      ctx.restore();
+      ctx.save(); ctx.textAlign = right ? "right" : "left"; ctx.textBaseline = "alphabetic";
+      ctx.font = "900 12px system-ui"; ctx.fillStyle = "#fff2a0";
+      ctx.shadowColor = "rgba(255,210,60,.95)"; ctx.shadowBlur = 8;
+      ctx.fillText("MAX", right ? x + w : x, y - 3);
+      ctx.restore();
+    }
+  }
+  // ラウンド取得ランプ（ダイヤ型）
+  drawLamp(ctx, cx, cy, on) {
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(Math.PI / 4);
+    if (on) { ctx.shadowColor = "rgba(255,210,60,.95)"; ctx.shadowBlur = 9; ctx.fillStyle = "#ffd23d"; }
+    else ctx.fillStyle = "rgba(255,255,255,.18)";
+    ctx.fillRect(-5, -5, 10, 10);
+    if (on) { ctx.strokeStyle = "rgba(255,255,255,.8)"; ctx.lineWidth = 1; ctx.strokeRect(-5, -5, 10, 10); }
+    ctx.restore();
   }
   drawHUD(ctx) {
-    const bw = 480, bh = 26, my = 30;
-    this.drawBar(ctx, 40, my, bw, bh, this.p1.hp / 100, "#39d353", false);
-    this.drawBar(ctx, W - 40 - bw, my, bw, bh, this.p2.hp / 100, "#ff4d4d", true);
-    // メーター
-    this.drawBar(ctx, 40, my + bh + 8, bw * 0.7, 10, this.p1.meter / MAX_METER, "#ffd23d", false);
-    this.drawBar(ctx, W - 40 - bw * 0.7, my + bh + 8, bw * 0.7, 10, this.p2.meter / MAX_METER, "#ffd23d", true);
-    // 名前
-    ctx.fillStyle = "#fff"; ctx.font = "bold 20px system-ui"; ctx.textBaseline = "alphabetic";
-    ctx.textAlign = "left"; ctx.fillText(this.p1.name, 42, my - 8);
-    ctx.textAlign = "right"; ctx.fillText(this.p2.name, W - 42, my - 8);
-    // タイマー
-    ctx.textAlign = "center"; ctx.font = "bold 40px system-ui";
-    ctx.fillStyle = this.timer < 11 ? "#ff6b6b" : "#fff";
-    ctx.fillText(Math.ceil(this.timer), W / 2, my + 38);
-    // ラウンドランプ
+    // ダメージ残像トレイルの値を更新（被弾でゆっくり減る）
+    if (!this._hpTrail) this._hpTrail = [this.p1.hp, this.p2.hp];
+    const tr = this._hpTrail;
+    for (const k of [0, 1]) {
+      const hp = k === 0 ? this.p1.hp : this.p2.hp;
+      if (tr[k] > hp) { tr[k] += (hp - tr[k]) * 0.07; if (Math.abs(tr[k] - hp) < 0.3) tr[k] = hp; }
+      else tr[k] = hp;
+    }
+    const bw = 500, bh = 30, my = 32;
+    this.drawBar(ctx, 40, my, bw, bh, this.p1.hp / 100, "#39d353", false, tr[0] / 100, false);
+    this.drawBar(ctx, W - 40 - bw, my, bw, bh, this.p2.hp / 100, "#ff4d4d", true, tr[1] / 100, false);
+    // スーパーゲージ
+    const mw = bw * 0.66, mh = 12, mty = my + bh + 9;
+    this.drawMeter(ctx, 40, mty, mw, mh, this.p1.meter / MAX_METER, false);
+    this.drawMeter(ctx, W - 40 - mw, mty, mw, mh, this.p2.meter / MAX_METER, true);
+    // 名前（グロー付き）
+    ctx.save(); ctx.font = "900 22px system-ui"; ctx.textBaseline = "alphabetic";
+    ctx.shadowColor = "rgba(120,180,255,.85)"; ctx.shadowBlur = 8; ctx.fillStyle = "#fff";
+    ctx.textAlign = "left"; ctx.fillText(this.p1.name, 48, my - 9);
+    ctx.textAlign = "right"; ctx.fillText(this.p2.name, W - 48, my - 9);
+    ctx.restore();
+    // タイマー（縁取り＋グロー）
+    ctx.save(); ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    const tlow = this.timer < 11; const ts = Math.ceil(this.timer);
+    ctx.font = "900 46px system-ui";
+    ctx.shadowColor = tlow ? "rgba(255,60,60,.95)" : "rgba(120,180,255,.7)"; ctx.shadowBlur = 14;
+    ctx.lineWidth = 5; ctx.strokeStyle = "#0a0d1a"; ctx.strokeText(ts, W / 2, my + 40);
+    ctx.fillStyle = tlow ? "#ff5b5b" : "#fff"; ctx.fillText(ts, W / 2, my + 40);
+    ctx.restore();
+    // ラウンドランプ（ダイヤ）
     for (let i = 0; i < 2; i++) {
-      ctx.fillStyle = this.wins[0] > i ? "#ffd23d" : "rgba(255,255,255,.2)";
-      ctx.beginPath(); ctx.arc(W / 2 - 22 - i * 18, my + 4, 6, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = this.wins[1] > i ? "#ffd23d" : "rgba(255,255,255,.2)";
-      ctx.beginPath(); ctx.arc(W / 2 + 22 + i * 18, my + 4, 6, 0, Math.PI * 2); ctx.fill();
+      this.drawLamp(ctx, W / 2 - 28 - i * 16, my + 6, this.wins[0] > i);
+      this.drawLamp(ctx, W / 2 + 28 + i * 16, my + 6, this.wins[1] > i);
     }
   }
   drawBanner(ctx) {
