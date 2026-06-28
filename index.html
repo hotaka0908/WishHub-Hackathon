@@ -2325,10 +2325,11 @@ class Game {
       tlow ? "#ff3535" : "#4aa6ff",
       tlow ? "rgba(255,60,60,.85)" : "rgba(90,170,255,.7)", -0.1);
     ctx.restore();
-    // ラウンドランプ（ダイヤ）
+    // ラウンドランプ（ダイヤ）：タイマーの真下に置いて数字と重ならないように
+    const ly = my + 58;
     for (let i = 0; i < 2; i++) {
-      this.drawLamp(ctx, W / 2 - 28 - i * 16, my + 6, this.wins[0] > i);
-      this.drawLamp(ctx, W / 2 + 28 + i * 16, my + 6, this.wins[1] > i);
+      this.drawLamp(ctx, W / 2 - 13 - i * 16, ly, this.wins[0] > i);
+      this.drawLamp(ctx, W / 2 + 13 + i * 16, ly, this.wins[1] > i);
     }
   }
   drawNeonText(ctx, text, x, y, size, c0, c1, glow, slant) {
