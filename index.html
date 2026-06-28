@@ -574,7 +574,6 @@ class Fighter {
         game.hitstop = Math.max(game.hitstop, 0.06);          // 撃つ瞬間に一瞬タメ
         game.setSlow(0.4, 0.28);                              // 発動スロー
         game.flash = 0.28; game.flashMax = 0.28; game.flashColor = "#cfeaff";
-        game.showCallout(ULTIMATE.name + "！", "#9fe8ff");
         const sx = this.x + this.facing * 30, sy = this.y - 110;
         game.fx.shock(sx, sy, "#7fd6ff");
         game.fx.speedlines(sx, sy, "#cfeaff");
@@ -1769,14 +1768,6 @@ class Game {
     // メーター
     this.drawBar(ctx, 40, my + bh + 8, bw * 0.7, 10, this.p1.meter / MAX_METER, "#ffd23d", false);
     this.drawBar(ctx, W - 40 - bw * 0.7, my + bh + 8, bw * 0.7, 10, this.p2.meter / MAX_METER, "#ffd23d", true);
-    // 次に出る技（ループ位置）
-    ctx.font = "bold 15px system-ui"; ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#bcd6ff"; ctx.textAlign = "left";
-    ctx.fillText("NEXT ▶ " + NORMALS[this.p1.comboIndex % NORMALS.length].name, 42, my + bh + 36);
-    if (this.mode === "vs") {
-      ctx.fillStyle = "#ffc2c2"; ctx.textAlign = "right";
-      ctx.fillText("◀ NEXT " + NORMALS[this.p2.comboIndex % NORMALS.length].name, W - 42, my + bh + 36);
-    }
     // 名前
     ctx.fillStyle = "#fff"; ctx.font = "bold 20px system-ui"; ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left"; ctx.fillText(this.p1.name, 42, my - 8);
