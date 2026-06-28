@@ -476,8 +476,7 @@ const Input = (() => {
     if (key === "Enter") { enterPressed = true; e.preventDefault(); return; }
     // タイトル用：上下でメニュー移動、数字で直接選択
     if (code === "ArrowUp" || code === "ArrowDown") { menuNav = code === "ArrowUp" ? -1 : 1; e.preventDefault(); return; }
-    if (key === "1") { digitPick = 0; e.preventDefault(); return; }
-    if (key === "2") { digitPick = 1; e.preventDefault(); return; }
+    if (key >= "1" && key <= "5") { digitPick = (+key) - 1; e.preventDefault(); return; }
 
     if (mode === "online") {
       // CPU戦と同じ操作：←→で移動、A〜Zの文字キー連打で攻撃
@@ -1634,6 +1633,17 @@ function drawStar(ctx, cx, cy, spikes, outer, inner) {
   }
   ctx.closePath(); ctx.fill();
 }
+// 角丸長方形のパス（難易度カードなどに使用）
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
 
 class Effects {
   constructor() { this.parts = []; this.rings = []; this.bursts = []; this.lines = []; this.texts = []; this.banners = []; }
@@ -1986,7 +1996,8 @@ class Game {
       build: { limbW: 1.24, torsoW: 1.2, headR: 16, hair: "mohawk", beard: true }, // がっしりパワー型・モヒカン
       colors: {
       skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } });
-    this.ai = { timer: 0, action: "idle", moveDir: 0, level: 1 };
+    this.ai = { timer: 0, action: "idle", moveDir: 0, level: 3, blockTimer: 0 };
+    this.aiLevel = 3;            // CPUの強さ（1〜5：防御とカウンターの上手さ）
     this.mode = "cpu";           // cpu = 対CPU / vs = ローカル2人 / vs+online = オンライン
     this.menuIndex = 0;          // タイトルの選択（0=CPU / 1=オンライン）
     this.online = false;         // オンライン対戦中か
@@ -2013,6 +2024,7 @@ class Game {
   }
   startMatch() {
     this.wins = [0, 0]; this.round = 1;
+    this.ai.level = this.aiLevel;                 // 選んだ難易度を反映
     Input.setMode(this.online ? "online" : this.mode);
     // モードに応じてP2をCPU/人間に、名前も切替
     this.p2.isCPU = (this.mode === "cpu");
@@ -2022,7 +2034,7 @@ class Game {
       this.p2.name = this.netRole === "guest" ? "あなた" : "あいて";
     } else {
       this.p1.name = (this.mode === "cpu") ? "あなた" : "1P";
-      this.p2.name = (this.mode === "cpu") ? "CPU" : "2P";
+      this.p2.name = (this.mode === "cpu") ? ("CPU Lv" + this.aiLevel) : "2P";
     }
     this.p1.comboIndex = 0; this.p2.comboIndex = 0;  // 新しい試合のみ攻撃ループを最初から
     Audio_.startBGM();
@@ -2050,8 +2062,14 @@ class Game {
   }
   // タイトルメニューの決定
   confirmMenu() {
-    if (this.menuIndex === 0) { this.mode = "cpu"; this.online = false; this.startMatch(); }
+    if (this.menuIndex === 0) { this.mode = "cpu"; this.online = false; this.state = "difficulty"; } // 難易度選択へ
     else { this.online = true; openLobby(); }   // オンライン：ロビーを開く
+  }
+  // 難易度（CPUレベル）を決めて開始
+  startCpu(level) {
+    this.aiLevel = Math.max(1, Math.min(5, level));
+    this.mode = "cpu"; this.online = false;
+    this.startMatch();
   }
   startRound() {
     this.p1.reset(1); this.p2.reset(-1);
@@ -2081,25 +2099,44 @@ class Game {
   updateAI(dt) {
     const me = this.p2, you = this.p1;
     const a = this.ai;
+    // ===== レベル(1〜5)で「防御」と「カウンター」の上手さをスケール =====
+    const t = ((a.level || 3) - 1) / 4;          // 0(Lv1)〜1(Lv5)
+    const blockMelee = 0.05 + 0.62 * t;          // 接近攻撃への反応ガード
+    const blockProj  = 0.03 + 0.55 * t;          // 必殺技(飛び道具)へのガード
+    const counter    = 0.10 + 0.82 * t;          // 隙・ガード後のカウンター
+    const aggro      = 0.55 + 0.22 * t;          // 近距離での攻撃積極性
     a.timer -= dt;
+    // ガード直後のカウンター窓を保持
+    if (me.blockstun > 0) a.blockTimer = 0.4; else a.blockTimer = Math.max(0, a.blockTimer - dt);
     const dist = Math.abs(you.x - me.x);
     const toYou = Math.sign(you.x - me.x) || 1;
 
-    // 反応ガード：相手が近距離で攻撃中なら高確率でガード
-    if (you.state === "attack" && dist < 170 && me.canAct()) {
-      if (Math.random() < 0.12) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.18; }
+    // 反応ガード（メレー）：レベルが高いほど的確に止める
+    if (you.state === "attack" && dist < 175 && me.canAct()) {
+      if (Math.random() < blockMelee) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.16; }
     }
-    // 飛び道具を避ける/ガード
+    // 必殺技(飛び道具)のガード
     for (const pr of this.projectiles) {
       if (pr.owner === me) continue;
-      if (Math.sign(pr.vx) === toYou * -1 && Math.abs(pr.x - me.x) < 260) {
-        if (Math.random() < 0.06) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
+      if (Math.sign(pr.vx) === -toYou && Math.abs(pr.x - me.x) < 320) {
+        if (Math.random() < blockProj) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
+      }
+    }
+    // カウンター：相手の技後の隙／自分のガード直後／相手の硬直に差し込む
+    const youWhiff = you.state === "attack" && you.attack && you.attack.t > you.attack.move.he;
+    const opportunity = a.blockTimer > 0 || youWhiff || you.state === "hit";
+    if (opportunity && dist < 185 && me.canAct() && a.action !== "block") {
+      if (Math.random() < counter) {
+        me.request("normal", Math.floor(Math.random() * 5));
+        a.blockTimer = 0; a.action = "wait"; a.moveDir = 0; a.timer = 0.26 + Math.random() * 0.2;
+        me.walk(0, you);
+        return;
       }
     }
 
     // 通常技だけで戦う（必殺技はゲージ満タンで自動発動＝プレイヤーと同条件）
     if (a.timer <= 0) {
-      a.timer = 0.18 + Math.random() * 0.35;
+      a.timer = (0.34 - 0.16 * t) + Math.random() * 0.3;   // 高レベルほど判断が速い
       if (dist > 320) { a.action = "approach"; a.moveDir = toYou; }
       else if (dist > 150) {
         const r = Math.random();
@@ -2107,8 +2144,8 @@ class Game {
         else { a.action = "wait"; a.moveDir = (Math.random() < 0.5 ? -toYou : 0); }
       } else {
         const r = Math.random();
-        if (r < 0.72) a.action = "normal";
-        else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.25; }
+        if (r < aggro) a.action = "normal";
+        else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.22; }
       }
     }
 
@@ -2172,13 +2209,22 @@ class Game {
     this.t += dt;
     Input.update();
 
-    // タイトル：↑↓でモード選択 / 1・2・3で直接選択 / Enterで決定
+    // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで決定
     if (this.state === "title") {
       const nav = Input.consumeNav();
       if (nav) this.menuIndex = (this.menuIndex + nav + 2) % 2;
       const d = Input.consumeDigit();
-      if (d >= 0) { this.menuIndex = d; this.confirmMenu(); return; }
+      if (d === 0 || d === 1) { this.menuIndex = d; this.confirmMenu(); return; }
       if (Input.consumeEnter()) { this.confirmMenu(); }
+      return;
+    }
+    // 難易度選択：↑↓でCPUレベル変更 / 1〜5で直接 / Enterで開始
+    if (this.state === "difficulty") {
+      const nav = Input.consumeNav();
+      if (nav) this.aiLevel = Math.max(1, Math.min(5, this.aiLevel + nav));
+      const d = Input.consumeDigit();
+      if (d >= 0 && d <= 4) { this.startCpu(d + 1); return; }
+      if (Input.consumeEnter()) { this.startCpu(this.aiLevel); return; }
       return;
     }
     if (this.state === "matchEnd") {
@@ -2458,6 +2504,67 @@ class Game {
     ctx.restore();
   }
 
+  // 難易度（CPUレベル）選択画面
+  drawDifficulty(ctx) {
+    ctx.save(); ctx.textAlign = "center";
+    // 見出し
+    ctx.font = "60px 'Black Ops One', Impact, system-ui";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(90,170,255,.8)"; ctx.shadowBlur = 22;
+    const g = ctx.createLinearGradient(0, H * 0.16 - 36, 0, H * 0.16 + 26);
+    g.addColorStop(0, "#fff"); g.addColorStop(0.6, "#bdf0ff"); g.addColorStop(1, "#4aa6ff");
+    ctx.fillStyle = g; ctx.fillText("SELECT LEVEL", W / 2, H * 0.16);
+    ctx.shadowBlur = 0;
+    ctx.font = "16px system-ui"; ctx.fillStyle = "#9fb4e0";
+    ctx.fillText("CPUの強さ（防御とカウンターの上手さ）", W / 2, H * 0.235);
+
+    // 5段階のレベルバー
+    const labels = ["かんたん", "ふつう", "つよい", "とても強い", "鬼"];
+    const n = 5, bw = 150, gap = 22, totalW = n * bw + (n - 1) * gap;
+    const x0 = (W - totalW) / 2, by = H * 0.46, bh = 120;
+    for (let i = 0; i < n; i++) {
+      const lv = i + 1, sel = this.aiLevel === lv;
+      const x = x0 + i * (bw + gap);
+      // 強さで色を寒色→暖色へ
+      const hue = 200 - i * 42;
+      ctx.save();
+      if (sel) { ctx.shadowColor = `hsla(${hue},90%,60%,.9)`; ctx.shadowBlur = 26; }
+      ctx.fillStyle = sel ? `hsla(${hue},85%,22%,1)` : "rgba(26,30,52,.6)";
+      ctx.strokeStyle = sel ? `hsl(${hue},90%,62%)` : "rgba(120,150,210,.35)";
+      ctx.lineWidth = sel ? 3 : 1.5;
+      roundRect(ctx, x, by, bw, bh, 14); ctx.fill(); ctx.stroke();
+      ctx.restore();
+      // ゲージ（強さの目安）
+      for (let s = 0; s < 5; s++) {
+        ctx.fillStyle = s <= i ? `hsl(${hue},85%,${sel ? 62 : 46}%)` : "rgba(255,255,255,.12)";
+        ctx.fillRect(x + 18 + s * 24, by + bh - 26, 18, 12);
+      }
+      // レベル番号
+      ctx.font = "44px 'Black Ops One', Impact, system-ui";
+      ctx.fillStyle = sel ? "#fff" : "rgba(255,255,255,.5)";
+      ctx.fillText("Lv" + lv, x + bw / 2, by + 38);
+      // ラベル
+      ctx.font = "16px 'Russo One', system-ui";
+      ctx.fillStyle = sel ? `hsl(${hue},90%,75%)` : "rgba(180,195,230,.55)";
+      ctx.fillText(labels[i], x + bw / 2, by + 74);
+    }
+    // 選択中レベルの説明
+    const descs = [
+      "ほとんどガードしない。連打が通る入門用。",
+      "たまにガード。基本の手応え。",
+      "読んでガード、隙にカウンター。標準。",
+      "高確率でガード。空振りを的確に狩る。",
+      "ほぼ完璧な防御と即カウンター。歴戦向け。",
+    ];
+    ctx.font = "20px system-ui"; ctx.fillStyle = "#cdd8f5";
+    ctx.fillText(descs[this.aiLevel - 1], W / 2, by + bh + 56);
+
+    // 操作説明
+    ctx.font = "15px system-ui"; ctx.fillStyle = "#7e87b5";
+    ctx.fillText("↑ ↓ で選択 ・ 1〜5 で直接 ・ Enter で開始", W / 2, H * 0.86);
+    ctx.restore();
+  }
+
   draw(ctx) {
     let ox = 0, oy = 0;
     if (this.shake > 0) { ox = (Math.random() - 0.5) * this.shake; oy = (Math.random() - 0.5) * this.shake; }
@@ -2476,6 +2583,7 @@ class Game {
     Stage.draw(ctx, this.t, camX);
 
     if (this.state === "title") { this.drawTitle(ctx); ctx.restore(); ctx.restore(); return; }
+    if (this.state === "difficulty") { this.drawDifficulty(ctx); ctx.restore(); ctx.restore(); return; }
 
     // ファイター
     this.p2.draw(ctx); this.p1.draw(ctx);
