@@ -588,7 +588,7 @@ class Fighter {
       game.setSlow(0.5 * juice, 0.15);                      // しっかり効くスロー
       game.cineZoom(0.24, hx, hy, 0.16);                    // ズームパンチ
       game.shake = Math.max(game.shake, (20 + dmg) * juice);
-      if (game.flash < 0.24) { game.flash = 0.24; game.flashMax = 0.24; game.flashColor = "#fff2c8"; }
+      if (game.flash < 0.1) { game.flash = 0.1; game.flashMax = 0.18; game.flashColor = "#fff2c8"; } // 控えめに
       game.fx.megashock(hx, hy);
       game.fx.speedlines(hx, hy, "#ffe39a");
       game.fx.burst(hx, hy, "#fff2b0");
@@ -601,7 +601,7 @@ class Fighter {
       game.setSlow(0.16, 0.1);                              // 一瞬キュッと止まるキレ
       game.cineZoom(0.14, hx, hy, 0.07);                    // 小さなズームパンチ
       game.shake = Math.max(game.shake, (12 + dmg) * juice);
-      if (game.flash < 0.14) { game.flash = 0.14; game.flashMax = 0.14; game.flashColor = "#fff6cf"; }
+      // 軽い打撃では画面フラッシュなし（明るくなりすぎ防止）
       game.fx.spark(hx, hy, fromDir, "#ffd36b", 20 + dmg);
       game.fx.ring(hx, hy, "#fff2b0");
       game.fx.burst(hx, hy, "#fff6cf");
