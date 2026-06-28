@@ -223,36 +223,42 @@ const Audio_ = (() => {
         crack(0.11 + 0.03 * s, 0.18 + 0.05 * s, 1400, 4400 + 800 * s);
       }
     },
-    hit(strength, pose) {
+    hit(strength, pose, combo) {
       ensure();
       const s = strength; pose = pose || "punch"; // 0=軽い / 1=重い
-      // === 共通：当たりの芯＋サブブームで“大袈裟”な土台 ===
-      thump(215 + 50 * s, 50, 0.22 + 0.08 * s, 0.82 + 0.18 * s);   // ドスッ（強化）
+      const B = punchBus;                                  // 余韻（リバーブ）つきバス
+      const semis = Math.min(7, Math.max(0, (combo || 1) - 1));
+      const cp = Math.pow(2, semis / 12);                  // コンボで音程が上がる＝爽快感
+      const p = cp * (0.95 + Math.random() * 0.1);         // 毎ヒットの微ピッチ揺らぎ（飽き防止）
+      // === 共通：当たりの芯＋サブブーム（低音はドライでタイトに） ===
+      thump(215 + 50 * s, 50, 0.22 + 0.08 * s, 0.82 + 0.18 * s);   // ドスッ
       thump(68, 32, 0.42 + 0.1 * s, 0.5 + 0.12 * s);               // ドゥーン（サブブーム）
-      crunch(0.1 + 0.04 * s, 0.6 + 0.2 * s, 2600 + 300 * s, 600, 14 + 9 * s); // バキッ
-      tone("triangle", 2500, 1500, 0.14 + 0.04 * s, 0.1 + 0.03 * s);          // キィン（抜ける高音シマー）
+      crunch(0.1 + 0.04 * s, 0.6 + 0.2 * s, (2600 + 300 * s) * p, 600, 14 + 9 * s, B); // バキッ
+      tone("triangle", 2500 * p, 1500 * p, 0.14 + 0.04 * s, 0.1 + 0.03 * s, B);        // キィン
       // === 技ごとの味付け ===
       if (pose === "punch") {
         // バキィン：金属的な鋭いリングで派手に
-        tone("square", 360 + 80 * s, 90, 0.08, 0.34);
-        tone("triangle", 1500 + 200 * s, 720, 0.2 + 0.05 * s, 0.18);   // キラッと余韻
-        crack(0.03, 0.12 + 0.12 * s, 3600, 1800);
+        tone("square", (360 + 80 * s) * p, 90 * p, 0.08, 0.34, B);
+        tone("triangle", (1500 + 200 * s) * p, 720 * p, 0.2 + 0.05 * s, 0.18, B);   // キラッと余韻
+        crack(0.03, 0.12 + 0.12 * s, 3600, 1800, B);
       } else if (pose === "kick" || pose === "jumpkick") {
         // ドガァン：重い低音＋落ちるスイープ
-        tone("sawtooth", 260, 60, 0.24 + 0.06 * s, 0.32);
+        tone("sawtooth", 260 * p, 60, 0.24 + 0.06 * s, 0.32, B);
         thump(120, 38, 0.32, 0.42);
-        crack(0.04, 0.14 + 0.12 * s, 3000, 1500);
+        crack(0.04, 0.14 + 0.12 * s, 3000, 1500, B);
       } else if (pose === "spin") {
         // ガガガッ→ドバァン：連続衝撃で乱舞感
-        tone("sawtooth", 520, 130, 0.32, 0.22);                       // 唸る回転音
-        setTimeout(() => { if (ac) crunch(0.05, 0.45, 2200, 700, 18); }, 45);
-        setTimeout(() => { if (ac) { crunch(0.08, 0.55, 2400, 600, 18); thump(150, 44, 0.28, 0.55); } }, 95);
+        tone("sawtooth", 520 * p, 130, 0.32, 0.22, B);                // 唸る回転音
+        setTimeout(() => { if (ac) crunch(0.05, 0.45, 2200 * p, 700, 18, punchBus); }, 45);
+        setTimeout(() => { if (ac) { crunch(0.08, 0.55, 2400 * p, 600, 18, punchBus); thump(150, 44, 0.28, 0.55); } }, 95);
       } else {
         // push 等：唸る一撃
-        tone("sawtooth", 180, 540, 0.24, 0.3);
+        tone("sawtooth", 180, 540, 0.24, 0.3, B);
       }
       // 重い一撃：全体にさらに追い打ち “ドガッ”
-      if (s) { thump(112, 40, 0.32, 0.52); crunch(0.08, 0.42, 1500, 480, 18); }
+      if (s) { thump(112, 40, 0.32, 0.52); crunch(0.08, 0.42, 1500, 480, 18, B); }
+      // コンボの頂点で“ピキーン”と上昇する上モノ（脳汁ブースト）
+      if ((combo || 1) >= 3) tone("triangle", 1760 * p, 2640 * p, 0.18, 0.13, B);
     },
     block() { ensure(); noise(0.09, 0.4, 6000, 2500); tone("triangle", 700, 400, 0.08, 0.15); },
     special() {
@@ -562,7 +568,7 @@ class Fighter {
     this.flash = 0.2;
     this.meter = Math.min(MAX_METER, this.meter + Math.round(dmg * 0.6));
     const hx = this.x + fromDir * 24, hy = this.y - 112 + this.airY;
-    Audio_.hit(dmg > 12 ? 1 : 0, move.pose);
+    Audio_.hit(dmg > 12 ? 1 : 0, move.pose, this.hitCombo);
 
     // ===== 手応えの可視化（数字・コンボ・コール） =====
     const atkIdx = (this === game.p1) ? 1 : 0;     // 攻撃側
