@@ -49,7 +49,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
-<div id="hint">1P: A/D 移動・F 攻撃 ｜ 2P: ←→ 移動・／ 攻撃 ｜ Enter 決定/リスタート</div>
+<div id="hint">移動: ←→ または A/D ｜ 攻撃: F / Space（CPU戦は文字キー連打）｜ Enter 決定/リスタート</div>
 
 <!-- オンライン対戦ロビー -->
 <div id="lobby" class="overlay hidden">
@@ -843,10 +843,11 @@ class Fighter {
     if (this.state === "attack" && this.attack) {
       const a = this.attack, m = a.move, tn = a.t;
       let s; // 伸縮量(-:縮む / +:伸びる)
-      if (tn < m.hs) { const k = m.hs > 0 ? tn / m.hs : 1; s = -0.16 * (k * (2 - k)); }
+      if (tn < m.hs) { const k = m.hs > 0 ? tn / m.hs : 1; s = -0.22 * (k * (2 - k)); }
       else if (tn <= m.he) { const k = (tn - m.hs) / Math.max(0.001, m.he - m.hs); s = 1 - Math.pow(1 - k, 3); }
       else { const k = (tn - m.he) / Math.max(0.001, m.dur - m.he); s = Math.max(0, 1 - k * k); }
-      const up = 1 + 0.16 * s, fore = 1 + 0.55 * s, th = 1 + 0.14 * s, sh = 1 + 0.6 * s;
+      // 大きく伸ばす（前腕・すねを主役に、上腕・ももも追従）
+      const up = 1 + 0.40 * s, fore = 1 + 1.05 * s, th = 1 + 0.34 * s, sh = 1 + 1.10 * s;
       if (m.pose === "kick") { if (m.arm === "back") { mTHb = th; mSHb = sh; } else { mTHf = th; mSHf = sh; } }
       else if (m.pose === "jumpkick") { mTHf = th; mSHf = sh; }
       else if (m.pose === "spin") { mUAf = mUAb = up; mFAf = mFAb = fore; }
@@ -2040,11 +2041,10 @@ class Game {
 
     // モード選択メニュー
     const opts = [
-      { t: "1  CPU と対戦", y: H * 0.47 },
-      { t: "2  2人で対戦（同じPC）", y: H * 0.55 },
-      { t: "3  オンライン対戦", y: H * 0.63 },
+      { t: "1  CPU と対戦", y: H * 0.50 },
+      { t: "2  オンライン対戦", y: H * 0.59 },
     ];
-    ctx.font = "bold 32px system-ui";
+    ctx.font = "bold 34px system-ui";
     for (let i = 0; i < opts.length; i++) {
       const sel = this.menuIndex === i;
       ctx.fillStyle = sel ? "#ffd23d" : "rgba(255,255,255,.55)";
@@ -2053,10 +2053,10 @@ class Game {
     }
     // 操作説明
     ctx.font = "bold 17px system-ui"; ctx.fillStyle = "#9fb4e0";
-    ctx.fillText("↑↓で選択 ・ Enter / 数字キー で決定", W / 2, H * 0.73);
+    ctx.fillText("↑↓で選択 ・ Enter / 数字キー で決定", W / 2, H * 0.72);
     ctx.font = "14px system-ui"; ctx.fillStyle = "#7e87b5";
-    ctx.fillText("CPU戦  1P: ←→ 移動 / 文字キー 攻撃", W / 2, H * 0.81);
-    ctx.fillText("ローカル対戦  1P: A D・F   2P: ←→・／   ｜  オンライン  移動: ←→/AD  攻撃: F/Space", W / 2, H * 0.85);
+    ctx.fillText("CPU戦  ←→ 移動 / 文字キー 攻撃", W / 2, H * 0.80);
+    ctx.fillText("オンライン  移動: ←→ または A D   攻撃: F / Space", W / 2, H * 0.84);
     ctx.restore();
   }
 
