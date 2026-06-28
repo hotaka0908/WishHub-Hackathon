@@ -4,6 +4,9 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>VIBE FIGHT — 2D Fighting</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Russo+One&display=swap" rel="stylesheet">
 <style>
   :root { --bg:#05060d; }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -2329,19 +2332,39 @@ class Game {
   }
   drawTitle(ctx) {
     ctx.save(); ctx.textAlign = "center";
-    ctx.font = "900 110px system-ui";
-    ctx.lineWidth = 10; ctx.strokeStyle = "#10081a";
-    ctx.strokeText("VIBE FIGHT", W / 2, H * 0.30);
-    const g = ctx.createLinearGradient(0, H * 0.30 - 60, 0, H * 0.30 + 30);
-    g.addColorStop(0, "#9fe8ff"); g.addColorStop(0.5, "#5aa6ff"); g.addColorStop(1, "#ff5bd0");
-    ctx.fillStyle = g; ctx.fillText("VIBE FIGHT", W / 2, H * 0.30);
+    // ===== 戦闘ロゴ（迫力フォント＋3D押し出し＋発光＋前傾スラント） =====
+    const T = "VIBE FIGHT";
+    ctx.save();
+    ctx.textBaseline = "middle";
+    const pulse = 1 + Math.sin(this.t * 2.4) * 0.015;
+    ctx.translate(W / 2, H * 0.30); ctx.scale(pulse, pulse);
+    ctx.transform(1, 0, -0.16, 1, 0, 0);                 // 前傾スラント＝攻撃的
+    ctx.font = "100px 'Black Ops One', Impact, system-ui";
+    if ("letterSpacing" in ctx) { try { ctx.letterSpacing = "3px"; } catch (e) {} }
+    // 奥行き（暗色を斜め下へ重ねて立体ブロック文字に）
+    ctx.fillStyle = "#0b0716";
+    for (let d = 12; d >= 1; d--) ctx.fillText(T, d * 1.4, d * 1.4);
+    // ネオンの外周グロー＋縁取り
+    ctx.shadowColor = "rgba(90,170,255,.85)"; ctx.shadowBlur = 30;
+    ctx.lineWidth = 9; ctx.lineJoin = "round"; ctx.strokeStyle = "#0a0a1c";
+    ctx.strokeText(T, 0, 0);
+    ctx.shadowBlur = 0;
+    // 本体グラデ（白→シアン→青→紫→マゼンタ）
+    const g = ctx.createLinearGradient(0, -60, 0, 54);
+    g.addColorStop(0, "#ffffff"); g.addColorStop(0.26, "#bdf0ff");
+    g.addColorStop(0.52, "#4aa6ff"); g.addColorStop(0.76, "#7b6bff"); g.addColorStop(1, "#ff4fc8");
+    ctx.fillStyle = g; ctx.fillText(T, 0, 0);
+    // 上部の鋭いハイライト
+    ctx.save(); ctx.beginPath(); ctx.rect(-W / 2, -66, W, 30); ctx.clip();
+    ctx.fillStyle = "rgba(255,255,255,.3)"; ctx.fillText(T, 0, 0); ctx.restore();
+    ctx.restore();
 
     // モード選択メニュー
     const opts = [
       { t: "1  CPU と対戦", y: H * 0.50 },
       { t: "2  オンライン対戦", y: H * 0.59 },
     ];
-    ctx.font = "bold 34px system-ui";
+    ctx.font = "30px 'Russo One', system-ui";
     for (let i = 0; i < opts.length; i++) {
       const sel = this.menuIndex === i;
       ctx.fillStyle = sel ? "#ffd23d" : "rgba(255,255,255,.55)";
@@ -2548,6 +2571,10 @@ const Net = (() => {
    MAIN LOOP（固定タイムステップ）
    ===================================================================== */
 const game = new Game();
+// ロゴ用フォントを先読み（読み込み完了で自動的にロゴへ反映）
+if (document.fonts && document.fonts.load) {
+  try { document.fonts.load("100px 'Black Ops One'"); document.fonts.load("30px 'Russo One'"); } catch (e) {}
+}
 let last = performance.now(), acc = 0;
 const STEP = 1 / 60;
 function frame(now) {
