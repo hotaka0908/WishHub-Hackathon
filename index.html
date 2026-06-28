@@ -623,6 +623,8 @@ class Fighter {
       // のけぞりのみ
       this.state = "hit";
       this.hitstun = 0.26 + dmg * 0.012;
+      this.hitstunMax = this.hitstun;                 // のけぞりアニメ用
+      this.hitMag = Math.min(1.4, 0.7 + dmg * 0.05);  // ダメージで仰け反り量
       this.vx += fromDir * move.kb;
       if (move.up) this.airVY = move.up;
     }
@@ -803,12 +805,38 @@ class Fighter {
     p.hipH += breathe;
     if (this.state === "walk") p.hipH += Math.abs(Math.sin(this.walkPhase)) * 6;
     if (this.state === "block") { p = blendPose(p, 1, { fSh: 1.3, fEl: 2.7, bSh: 1.25, bEl: 2.6, lean: -0.25, hipH: 86 }); }
-    if (this.state === "hit") { p = blendPose(p, 0.6, { lean: -0.5, fSh: 0.4, bSh: 0.4, hipH: 90 }); }
+    if (this.state === "hit") {
+      // のけぞり：被弾の瞬間に大きく仰け反り、ブルッと震えてから戻る
+      const hm = this.hitstunMax || 0.3;
+      const pr = Math.max(0, Math.min(1, this.hitstun / hm));   // 1=被弾直後 → 0=回復
+      const el = hm - this.hitstun;                             // 経過時間
+      const mag = this.hitMag || 1;
+      const flinch = Math.min(1, pr * mag);
+      const jitter = Math.sin(el * 58) * 0.12 * pr;             // 衝撃のブレ
+      p = blendPose(p, flinch, {
+        lean: -0.85 + jitter,                                  // 後ろへ仰け反る
+        fSh: 0.1, bSh: 0.75, fEl: 1.35, bEl: 1.75,             // 腕が跳ね上がる
+        hipH: 86 - 6 * Math.sin(el * 26),                      // 上体のあおり
+        bHip: -0.5, fHip: 0.55, fKnee: 0.3,
+      });
+    }
     if (this.state === "knockdown" || this.state === "ko") {
-      // 吹っ飛び中は手足を投げ出し、ダウン後は伸びる（回転は draw 側で付与）
-      p = this.prone
-        ? blendPose(p, 1, { hipH: 96, lean: 0, bHip: 0.1, fHip: -0.1, bKnee: 0.1, fKnee: -0.1, bSh: 0.5, fSh: -0.4, bEl: 0.4, fEl: -0.3 })
-        : blendPose(p, 0.8, { hipH: 92, lean: -0.2, bHip: 0.5, fHip: -0.4, bKnee: 0.3, fKnee: -0.3, bSh: -0.5, fSh: 0.6 });
+      if (!this.prone && this.airborne) {
+        // 吹っ飛び中：手足を風車のようにバタつかせる
+        const w = this.clock * 13;
+        p = blendPose(p, 0.85, {
+          hipH: 92, lean: -0.25,
+          bHip: 0.5 + Math.sin(w) * 0.45, fHip: -0.45 + Math.sin(w + 2.1) * 0.45,
+          bKnee: 0.25 + Math.sin(w + 1) * 0.3, fKnee: -0.3 + Math.sin(w + 3) * 0.3,
+          bSh: -0.5 + Math.sin(w + 1.5) * 0.7, fSh: 0.6 + Math.sin(w + 3.2) * 0.7,
+          bEl: 0.4, fEl: -0.3,
+        });
+      } else {
+        // 着地後は手足を投げ出して伸びる（回転は draw 側で付与）
+        p = this.prone
+          ? blendPose(p, 1, { hipH: 96, lean: 0, bHip: 0.1, fHip: -0.1, bKnee: 0.1, fKnee: -0.1, bSh: 0.5, fSh: -0.4, bEl: 0.4, fEl: -0.3 })
+          : blendPose(p, 0.8, { hipH: 92, lean: -0.2, bHip: 0.5, fHip: -0.4, bKnee: 0.3, fKnee: -0.3, bSh: -0.5, fSh: 0.6 });
+      }
     }
     if (this.state === "attack" && this.attack) {
       const a = this.attack, m = a.move, tn = a.t;
