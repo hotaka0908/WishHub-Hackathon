@@ -23,8 +23,6 @@ git commit -m "$msg"
 git push origin main
 
 echo ""
-echo "✅ GitHub に push しました。"
-echo "   ※ push では自動デプロイされません（vercel.json で無効化済み）。"
-echo "   デプロイするには手動で:  vercel --prod"
+echo "✅ GitHub に push しました。Vercel が自動でデプロイします。"
 echo "   公開URL: https://neon-fist.vercel.app/"
 echo "   ダッシュボード: https://vercel.com/hotakas-projects/neon-fist"
