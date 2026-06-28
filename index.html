@@ -1722,7 +1722,7 @@ class Game {
     this.timer = 60;
     this.hitstop = 0; this.shake = 0; this.slow = 0; this.slowFactor = 0.35;
     this.flash = 0; this.flashMax = 1; this.flashColor = "#ffffff";
-    this.cine = 0; this.cineMax = 1; this.zoomFocus = { x: W / 2, y: H / 2 }; // シネマズーム
+    this.cine = 0; this.cineMax = 1; this.cineAmt = 0.34; this.zoomFocus = { x: W / 2, y: H / 2 }; // シネマズーム
     this.t = 0;
     this.koTarget = null;
     this.firstHit = false;
@@ -1786,8 +1786,8 @@ class Game {
   spawnProjectile(owner) { this.projectiles.push(new Projectile(owner, this)); Audio_.fire(); }
   // スロー演出（残り時間と倍率を指定。倍率が小さいほど遅い）
   setSlow(dur, factor) { if (dur > this.slow) this.slow = dur; this.slowFactor = Math.min(this.slowFactor, factor); }
-  // 衝撃点へのシネマズーム（dur 秒かけて戻る）
-  cineZoom(dur, x, y) { this.cine = dur; this.cineMax = dur; this.zoomFocus = { x, y }; }
+  // 衝撃点へのシネマズーム（dur 秒かけて戻る。amt=ズーム量、省略時0.34）
+  cineZoom(dur, x, y, amt) { this.cine = dur; this.cineMax = dur; this.zoomFocus = { x, y }; this.cineAmt = (amt == null ? 0.34 : amt); }
   onKO(loser) {
     if (this.state !== "fight") return;
     this.koTarget = loser;
@@ -2070,7 +2070,7 @@ class Game {
     ctx.save();
     ctx.translate(ox, oy);
     if (this.cine > 0) {
-      const z = 1 + (this.cine / Math.max(0.001, this.cineMax)) * 0.34;
+      const z = 1 + (this.cine / Math.max(0.001, this.cineMax)) * this.cineAmt;
       const fc = this.zoomFocus;
       ctx.translate(fc.x, fc.y); ctx.scale(z, z); ctx.translate(-fc.x, -fc.y);
     }
