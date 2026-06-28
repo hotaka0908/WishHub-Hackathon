@@ -106,6 +106,18 @@ const Audio_ = (() => {
     src.connect(ws); ws.connect(lp); lp.connect(g); g.connect(dest || master);
     src.start(); src.stop(now() + dur + 0.02);
   }
+  // 明るく抜ける高音の一発（パシッ／スパッ）— ハイパスでこもりを取る
+  function crack(dur, vol, hpStart, hpEnd, dest) {
+    const src = ac.createBufferSource(); src.buffer = noiseBuf;
+    const hp = ac.createBiquadFilter(); hp.type = "highpass";
+    hp.frequency.setValueAtTime(hpStart, now());
+    hp.frequency.exponentialRampToValueAtTime(Math.max(200, hpEnd), now() + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(vol, now());
+    g.gain.exponentialRampToValueAtTime(0.0006, now() + dur);
+    src.connect(hp); hp.connect(g); g.connect(dest || master);
+    src.start(); src.stop(now() + dur + 0.02);
+  }
   // 腹に来る低音ボディ（ダン／バン）— 急降下するキック的アタック
   function thump(f0, f1, dur, vol, dest) {
     const o = ac.createOscillator(); const g = ac.createGain();
@@ -121,21 +133,22 @@ const Audio_ = (() => {
     resume,
     whiff(strength) {
       ensure();
-      // 風切り＋ちょいザラつきで「ザッ」とした振り
-      noise(0.12 + 0.05 * strength, 0.18, 1600 + 400 * strength, 300);
-      crunch(0.05 + 0.02 * strength, 0.12 + 0.04 * strength, 3000, 700, 8);
+      // 抜けの良い「スパッ」とした風切り（ハイパスでこもらせない）
+      crack(0.1 + 0.04 * strength, 0.16 + 0.05 * strength, 1200, 4000 + 800 * strength);
     },
     hit(strength) {
       ensure();
       const s = strength; // 0=軽い / 1=重い
-      // ザクッ：歪んだ高音ノイズの砕けるアタック
-      crunch(0.06 + 0.03 * s, 0.6 + 0.18 * s, 5200, 800, 18 + 14 * s);
-      // バチッ：中音の鋭いスナップ
-      tone("square", 230 + 40 * s, 60, 0.07 + 0.02 * s, 0.32);
-      // ダン！：腹に来る低音ボディ
-      thump(155 + 30 * s, 42, 0.18 + 0.06 * s, 0.55 + 0.12 * s);
-      // 重い一撃はさらにドスッと余韻＆追い打ちのザラつき
-      if (s) { thump(80, 36, 0.28, 0.42); crunch(0.05, 0.32, 3200, 400, 26); }
+      // パシッ：抜けの良い高音アタック（こもり解消の主役）
+      crack(0.05 + 0.02 * s, 0.55 + 0.18 * s, 6500, 2200);
+      // バチッ：鋭い中音スナップ（高め＆短く）
+      tone("square", 320 + 70 * s, 90, 0.05 + 0.015 * s, 0.26);
+      // ジャリッ：歪みは控えめ＆明るめに
+      crunch(0.05 + 0.02 * s, 0.3 + 0.1 * s, 6000, 1800, 9 + 7 * s);
+      // ドン：低音はタイトに（こもらせない）
+      thump(150 + 30 * s, 50, 0.11 + 0.03 * s, 0.4 + 0.1 * s);
+      // 重い一撃だけ低音の余韻を少し足す
+      if (s) thump(85, 42, 0.18, 0.3);
     },
     block() { ensure(); noise(0.09, 0.4, 6000, 2500); tone("triangle", 700, 400, 0.08, 0.15); },
     special() {
