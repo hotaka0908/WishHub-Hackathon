@@ -353,21 +353,37 @@ class Fighter {
 
   takeHit(move, fromDir, game) {
     if (this.state === "ko" || this.state === "knockdown") return;  // ダウン中は追撃を受けない
-    const dmg = move.dmg, isUlt = !!move.projectile;
+    let dmg = move.dmg; const isUlt = !!move.projectile;
     if (this.blocking && !isUlt) {
       const chip = Math.max(1, Math.round(dmg * 0.18));
       this.hp -= chip; this.blockstun = 0.22; this.vx += fromDir * 120;
       this.meter = Math.min(MAX_METER, this.meter + 4);
+      this.hitCombo = 0;
       Audio_.block(); game.fx.spark(this.x, this.y - 110, fromDir, "#bcd6ff", 8);
+      game.showCallout("GUARD", "#bcd6ff");
       if (this.hp <= 0) this._ko(game, fromDir, false);
       return;
     }
+    // カウンター：相手の攻撃の出かかり/持続中につぶした
+    const counter = !isUlt && this.state === "attack" && this.attack && this.attack.t <= this.attack.move.he;
+    if (counter) dmg = Math.round(dmg * 1.4);
+    // コンボ：のけぞり/ダウン/空中＝連続ヒット中
+    const comboing = this.state === "hit" || this.airborne;
+    this.hitCombo = comboing ? this.hitCombo + 1 : 1;
+
     this.hp -= dmg;
     this.attack = null;
     this.flash = 0.2;
     this.meter = Math.min(MAX_METER, this.meter + Math.round(dmg * 0.6));
     const hx = this.x + fromDir * 24, hy = this.y - 112 + this.airY;
     Audio_.hit(dmg > 12 ? 1 : 0);
+
+    // ===== 手応えの可視化（数字・コンボ・コール） =====
+    const atkIdx = (this === game.p1) ? 1 : 0;     // 攻撃側
+    game.fx.dmgNum(hx, hy - 16, dmg, isUlt || dmg >= 16 || counter);
+    if (!game.firstHit && game.state === "fight") { game.firstHit = true; game.showCallout("FIRST ATTACK!", "#9fe8ff"); }
+    else if (counter) game.showCallout("COUNTER!", "#ff7be0");
+    if (this.hitCombo >= 2) game.showCombo(this.hitCombo, atkIdx, this.x, this.y - 196 + this.airY);
 
     // この攻撃でダウンするか？（キック・特別技・必殺技・打ち上げ技）
     const knockdown = isUlt || !!move.lunge || !!move.up || dmg >= 13;
@@ -837,9 +853,29 @@ function drawTorso(ctx, hip, sh, f, cloth, cloth2, edge, belt, tw) {
   ctx.beginPath(); ctx.moveTo(hip.x + f * 4, hip.y); ctx.lineTo(hip.x + f * 9, hip.y + 14); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(hip.x + f * 2, hip.y); ctx.lineTo(hip.x - f * 2, hip.y + 13); ctx.stroke();
 }
-function drawHead(ctx, head, f, skin, edge, C) {
+function drawHead(ctx, head, f, skin, edge, C, B, sway) {
+  B = B || {};
+  const R = B.headR || 15;
+  const style = B.hair || "spike";
+  const sw = sway || 0, lift = -Math.abs(sw) * 0.25;   // なびきの横ずれ／浮き
   ctx.save();
-  const R = 15;
+  ctx.lineJoin = "round";
+
+  // 後ろ髪（ポニーテール：spikeタイプ）— 顔より背面なので先に描く
+  if (style === "ponytail" || style === "spike") {
+    const bx = head.x - f * (R - 5), by = head.y - R + 5;
+    ctx.fillStyle = shade(C.hair, -.08);
+    ctx.beginPath();
+    ctx.moveTo(bx, by);
+    ctx.quadraticCurveTo(head.x - f * (R + 11) + sw * 0.7, head.y - 1 + lift, head.x - f * (R + 9) + sw, head.y + 18);
+    ctx.quadraticCurveTo(head.x - f * (R + 7) + sw * 1.3, head.y + 33, head.x - f * (R + 16) + sw * 1.7, head.y + 39);
+    ctx.quadraticCurveTo(head.x - f * (R + 1) + sw * 1.1, head.y + 28, head.x - f * 2, head.y + 4);
+    ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = shade(C.hair, -.3); ctx.stroke();
+    ctx.fillStyle = C.band;                               // 結び目
+    ctx.beginPath(); ctx.arc(bx - f * 2, by + 3, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+
   // 首
   ctx.strokeStyle = edge; ctx.lineCap = "round"; ctx.lineWidth = 18;
   ctx.beginPath(); ctx.moveTo(head.x - f * 2, head.y + 8); ctx.lineTo(head.x - f * 2, head.y + 22); ctx.stroke();
@@ -858,25 +894,57 @@ function drawHead(ctx, head, f, skin, edge, C) {
   fg.addColorStop(f > 0 ? 1 : 0, shade(skin, -.16));
   ctx.fillStyle = fg; ctx.fill();
   ctx.lineWidth = 3.5; ctx.strokeStyle = edge; ctx.stroke();
+  // 無精ひげ（パワー型）
+  if (B.beard) {
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = "rgba(0,0,0,0.22)";
+    ctx.beginPath();
+    ctx.moveTo(head.x - f * (R - 3), head.y + R * 0.4);
+    ctx.quadraticCurveTo(head.x + f * 2, head.y + R * 1.1, head.x + f * (R - 1), head.y + R * 0.35);
+    ctx.lineTo(head.x + f * (R - 1), head.y + R * 0.9);
+    ctx.quadraticCurveTo(head.x + f * 2, head.y + R * 1.25, head.x - f * (R - 3), head.y + R * 0.85);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
   // 耳
   ctx.fillStyle = shade(skin, -.08);
   ctx.beginPath(); ctx.ellipse(head.x - f * (R - 1), head.y + 2, 3.5, 5, 0, 0, Math.PI * 2); ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = edge; ctx.stroke();
-  // 髪（毛束・トゲ）
+
+  // 髪（トップ）
   ctx.fillStyle = C.hair;
-  ctx.beginPath();
-  ctx.moveTo(head.x - f * R, head.y + 1);
-  ctx.quadraticCurveTo(head.x - f * (R + 2), head.y - R - 3, head.x - f * 4, head.y - R - 2);
-  ctx.lineTo(head.x - f * 7, head.y - R - 8);
-  ctx.lineTo(head.x - f * 1, head.y - R - 3);
-  ctx.lineTo(head.x + f * 4, head.y - R - 9);
-  ctx.lineTo(head.x + f * 6, head.y - R - 2);
-  ctx.lineTo(head.x + f * 11, head.y - R - 6);
-  ctx.quadraticCurveTo(head.x + f * (R + 1), head.y - R + 2, head.x + f * R, head.y - 4);
-  ctx.lineTo(head.x + f * (R - 4), head.y - 6);
-  ctx.quadraticCurveTo(head.x, head.y - R + 1, head.x - f * (R - 5), head.y - 6);
-  ctx.closePath(); ctx.fill();
-  ctx.lineWidth = 2; ctx.strokeStyle = shade(C.hair, -.25); ctx.stroke();
+  if (style === "mohawk") {
+    // モヒカン：中央の隆起した尖り（両サイドは刈り上げ＝地肌）
+    ctx.beginPath();
+    ctx.moveTo(head.x - f * (R - 7), head.y - R + 6);
+    ctx.lineTo(head.x - f * 5, head.y - R - 11 + lift);
+    ctx.lineTo(head.x - f * 1, head.y - R - 2);
+    ctx.lineTo(head.x + f * 2 + sw * 0.4, head.y - R - 16 + lift);
+    ctx.lineTo(head.x + f * 5, head.y - R - 4);
+    ctx.lineTo(head.x + f * 8 + sw * 0.3, head.y - R - 12 + lift);
+    ctx.lineTo(head.x + f * (R - 6), head.y - R + 7);
+    ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = shade(C.hair, -.3); ctx.stroke();
+    // 刈り上げの影
+    ctx.fillStyle = "rgba(0,0,0,0.12)";
+    ctx.fillRect(head.x - f * R, head.y - R + 4, f * 5, 6);
+  } else {
+    // スパイク：逆立った毛束（先端がなびく）
+    ctx.beginPath();
+    ctx.moveTo(head.x - f * R, head.y + 1);
+    ctx.quadraticCurveTo(head.x - f * (R + 2), head.y - R - 3, head.x - f * 4 + sw * 0.3, head.y - R - 4 + lift);
+    ctx.lineTo(head.x - f * 7 + sw * 0.4, head.y - R - 11 + lift);
+    ctx.lineTo(head.x - f * 1 + sw * 0.4, head.y - R - 4 + lift);
+    ctx.lineTo(head.x + f * 4 + sw * 0.45, head.y - R - 13 + lift);
+    ctx.lineTo(head.x + f * 6 + sw * 0.45, head.y - R - 3 + lift);
+    ctx.lineTo(head.x + f * 11 + sw * 0.4, head.y - R - 9 + lift);
+    ctx.quadraticCurveTo(head.x + f * (R + 1), head.y - R + 2, head.x + f * R, head.y - 4);
+    ctx.lineTo(head.x + f * (R - 4), head.y - 6);
+    ctx.quadraticCurveTo(head.x, head.y - R + 1, head.x - f * (R - 5), head.y - 6);
+    ctx.closePath(); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = shade(C.hair, -.25); ctx.stroke();
+  }
+
   // ヘッドバンド（額に巻く）
   ctx.fillStyle = C.band;
   ctx.beginPath();
@@ -886,18 +954,18 @@ function drawHead(ctx, head, f, skin, edge, C) {
   ctx.quadraticCurveTo(head.x, head.y - 4, head.x - f * (R + 1), head.y + 1);
   ctx.closePath(); ctx.fill();
   ctx.lineWidth = 1.5; ctx.strokeStyle = shade(C.band, -.3); ctx.stroke();
-  // バンドのなびく結び
+  // バンドのなびく帯（揺れに追従）
   ctx.fillStyle = C.band;
   ctx.beginPath();
   ctx.moveTo(head.x - f * (R - 1), head.y - 3);
-  ctx.lineTo(head.x - f * (R + 16), head.y + 4);
-  ctx.lineTo(head.x - f * (R + 15), head.y + 9);
+  ctx.lineTo(head.x - f * (R + 16) + sw, head.y + 4 + lift);
+  ctx.lineTo(head.x - f * (R + 15) + sw, head.y + 9 + lift);
   ctx.lineTo(head.x - f * (R - 2), head.y + 2);
   ctx.closePath(); ctx.fill();
   ctx.beginPath();
   ctx.moveTo(head.x - f * (R - 1), head.y - 2);
-  ctx.lineTo(head.x - f * (R + 12), head.y + 12);
-  ctx.lineTo(head.x - f * (R + 9), head.y + 15);
+  ctx.lineTo(head.x - f * (R + 12) + sw * 1.3, head.y + 12 + lift);
+  ctx.lineTo(head.x - f * (R + 9) + sw * 1.3, head.y + 15 + lift);
   ctx.lineTo(head.x - f * (R - 2), head.y + 3);
   ctx.closePath(); ctx.fill();
   // 眉
@@ -1011,7 +1079,10 @@ function drawStar(ctx, cx, cy, spikes, outer, inner) {
 }
 
 class Effects {
-  constructor() { this.parts = []; this.rings = []; this.bursts = []; this.lines = []; }
+  constructor() { this.parts = []; this.rings = []; this.bursts = []; this.lines = []; this.texts = []; }
+  dmgNum(x, y, value, big) {
+    this.texts.push({ x: x + (Math.random() - 0.5) * 16, y, vy: -150, value: Math.round(value), life: 0.85, max: 0.85, big });
+  }
   spark(x, y, dir, color, n) {
     for (let i = 0; i < n; i++) {
       const a = (Math.random() - 0.5) * 2.2 + (dir > 0 ? 0 : Math.PI);
@@ -1040,6 +1111,8 @@ class Effects {
     this.bursts = this.bursts.filter(b => b.life > 0);
     for (const l of this.lines) l.life -= dt;
     this.lines = this.lines.filter(l => l.life > 0);
+    for (const t of this.texts) { t.y += t.vy * dt; t.vy *= Math.pow(0.02, dt); t.life -= dt; }
+    this.texts = this.texts.filter(t => t.life > 0);
   }
   draw(ctx) {
     // 集中線
@@ -1077,6 +1150,17 @@ class Effects {
       ctx.save(); ctx.globalAlpha = Math.max(0, p.life / p.max);
       ctx.fillStyle = p.color;
       ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    }
+    // ダメージ数字
+    for (const t of this.texts) {
+      const a = Math.max(0, t.life / t.max);
+      const sz = (t.big ? 38 : 26) * (a > 0.7 ? 1 + (a - 0.7) * 1.5 : 1); // 出現時に少し大きく
+      ctx.save(); ctx.globalAlpha = Math.min(1, a * 1.6);
+      ctx.font = "900 " + sz.toFixed(0) + "px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.lineWidth = 5; ctx.strokeStyle = "#2a0d0d"; ctx.strokeText(t.value, t.x, t.y);
+      ctx.fillStyle = t.big ? "#ffd23d" : "#fff";
+      ctx.fillText(t.value, t.x, t.y);
       ctx.restore();
     }
   }
@@ -1306,9 +1390,13 @@ class Game {
   constructor() {
     this.fx = new Effects();
     this.projectiles = [];
-    this.p1 = new Fighter({ name: "あなた", x: W * 0.32, facing: 1, colors: {
+    this.p1 = new Fighter({ name: "あなた", x: W * 0.32, facing: 1,
+      build: { limbW: 0.84, torsoW: 0.9, headR: 14, hair: "spike" },   // 細身スピード型・ポニーテール
+      colors: {
       skin: "#f0b58a", cloth: "#3da6ff", cloth2: "#2b6fd6", shoe: "#1a2740", hair: "#23314f", band: "#ff4d6d", belt: "#10204a" } });
-    this.p2 = new Fighter({ name: "CPU", x: W * 0.68, facing: -1, isCPU: true, colors: {
+    this.p2 = new Fighter({ name: "CPU", x: W * 0.68, facing: -1, isCPU: true,
+      build: { limbW: 1.24, torsoW: 1.2, headR: 16, hair: "mohawk", beard: true }, // がっしりパワー型・モヒカン
+      colors: {
       skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } });
     this.ai = { timer: 0, action: "idle", moveDir: 0, level: 1 };
     this.state = "title";        // title / ready / fight / roundEnd / matchEnd
