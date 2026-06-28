@@ -349,27 +349,28 @@ const Audio_ = (() => {
     // 勝利ファンファーレ（短くきれいに作曲・試合終了後に再生）
     victory() {
       ensure(); if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; }
-      const M = master;
-      const lead = (f, t, dur, vol) => setTimeout(() => { if (ac) { tone("square", f, f, dur, vol * 0.5, M); tone("triangle", f, f, dur * 1.1, vol * 0.65, M); } }, t);
-      const low = (f, t, dur, vol) => setTimeout(() => { if (ac) tone("triangle", f, f, dur, vol, M); }, t);
-      const kick = (t, vol) => setTimeout(() => { if (ac) thump(140, 48, 0.16, vol, M); }, t);
-      // フレーズ1：弾む上昇 ド・ミ・ソ・ド↑
-      lead(523, 0, 0.12, 0.3); lead(659, 150, 0.12, 0.3); lead(784, 300, 0.12, 0.3); lead(1047, 450, 0.30, 0.34);
-      // フレーズ2：ソ・ラ・シ・ド↑
-      lead(784, 800, 0.12, 0.3); lead(880, 950, 0.12, 0.3); lead(988, 1100, 0.12, 0.3); lead(1047, 1250, 0.34, 0.34);
-      // フレーズ3：駆け上がり ミ・ソ・ド・ミ↑
-      lead(659, 1650, 0.12, 0.3); lead(784, 1800, 0.12, 0.3); lead(1047, 1950, 0.12, 0.3); lead(1319, 2100, 0.42, 0.36);
-      // 低音とキックで疾走感
-      [0, 450, 800, 1250, 1650, 2100].forEach(t => kick(t, 0.5));
-      low(131, 0, 0.42, 0.22); low(98, 450, 0.34, 0.2); low(131, 800, 0.42, 0.22);
-      low(196, 1250, 0.38, 0.22); low(131, 1650, 0.42, 0.22); low(196, 2100, 0.42, 0.22);
-      // 決めの大メジャー和音（ジャーン！）＋キック＋ベース
-      const ct = 2600;
-      kick(ct, 0.7);
-      [523, 659, 784, 1047, 1319].forEach(f => lead(f, ct, 1.2, 0.12));
-      low(131, ct, 1.3, 0.26);
-      // 締めのきらめき上昇アルペジオ
-      [1047, 1319, 1568, 2093].forEach((f, i) => setTimeout(() => { if (ac) tone("triangle", f, f, 0.6, 0.13, M); }, ct + 120 + i * 90));
+      const M = master, B = punchBus;
+      // 鐘の音（温かく長く響く）— リバーブ送りでキラキラ
+      const bell = (f, t, dur, vol) => setTimeout(() => { if (ac) { tone("sine", f, f, dur, vol, B); tone("triangle", f, f, dur * 0.8, vol * 0.5, B); } }, t);
+      // 柔らかいパッド和音
+      const pad = (f, t, dur, vol) => setTimeout(() => { if (ac) tone("triangle", f, f, dur, vol, M); }, t);
+      // ハープ風の駆け上がり（祝福のきらめき）
+      const harp = (notes, t0, step, vol) => notes.forEach((f, i) => setTimeout(() => { if (ac) tone("triangle", f, f, 0.5, vol, B); }, t0 + i * step));
+
+      // 開始：ハープのきらめき上昇
+      harp([523, 587, 659, 784, 880, 1047], 0, 55, 0.12);
+      // 温かいコード進行 C → F → G → C（I–IV–V–I）＋鐘のメロ
+      pad(262, 0, 0.7, 0.16); pad(330, 0, 0.7, 0.13); pad(392, 0, 0.7, 0.13);     // C
+      bell(1047, 150, 0.6, 0.18);
+      pad(349, 700, 0.7, 0.16); pad(440, 700, 0.7, 0.13); pad(523, 700, 0.7, 0.13); // F
+      bell(1175, 850, 0.6, 0.18);
+      pad(392, 1400, 0.7, 0.16); pad(494, 1400, 0.7, 0.13); pad(587, 1400, 0.7, 0.13); // G
+      bell(1319, 1550, 0.6, 0.18);
+      // 大団円：明るい C メジャーを長く響かせる＋鐘＋ハープのきらめき
+      const ct = 2100;
+      pad(262, ct, 1.7, 0.18); pad(330, ct, 1.7, 0.14); pad(392, ct, 1.7, 0.14); pad(523, ct, 1.7, 0.14); // C（厚め）
+      bell(1047, ct, 1.5, 0.2); bell(1319, ct + 60, 1.5, 0.16); bell(1568, ct + 120, 1.4, 0.14);
+      harp([1047, 1319, 1568, 2093, 2637], ct + 220, 90, 0.12);   // 締めの祝福きらめき
     },
     // 敗北ジングル（短い下降・試合終了後に再生）
     defeat() {
