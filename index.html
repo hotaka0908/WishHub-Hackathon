@@ -457,11 +457,14 @@ function moveKeyframes(move) {
   const front = move.arm !== "back";
   if (move.pose === "punch") {
     return front ? {
-      windup: { fSh: 0.30, fEl: 0.05, bSh: 1.25, bEl: 1.75, lean: -0.34, hipH: 86, bHip: -0.45, fHip: 0.55 },
-      strike: { fSh: 1.62, fEl: 1.60, bSh: 0.10, bEl: 0.05, lean: 0.66, hipH: 98, bHip: -0.6, fHip: 0.78, fKnee: 0.5 },
+      // タメ：打つ前腕を後ろへ引いて拳を脇に構える＋上体を捻って引く
+      windup: { fSh: -0.5, fEl: -1.15, bSh: 1.5, bEl: 2.05, lean: -0.5, hipH: 86, bHip: -0.5, fHip: 0.35 },
+      // 振り抜き：拳を一気に前へ伸ばし切る（逆腕は引いて反動）
+      strike: { fSh: 1.62, fEl: 1.60, bSh: 0.05, bEl: 0.0, lean: 0.7, hipH: 98, bHip: -0.62, fHip: 0.8, fKnee: 0.5 },
     } : {
-      windup: { bSh: 0.15, bEl: -0.15, fSh: 1.25, fEl: 1.75, lean: -0.48, hipH: 84, bHip: -0.55 },
-      strike: { bSh: 1.62, bEl: 1.62, fSh: 0.08, fEl: 0.0, lean: 0.74, hipH: 98, bHip: -0.65, fHip: 0.82, fKnee: 0.45 },
+      // タメ：奥の拳を後ろへ大きく引き絞る（クロス／ストレート）
+      windup: { bSh: -0.5, bEl: -1.25, fSh: 1.35, fEl: 1.95, lean: -0.6, hipH: 84, bHip: -0.7, fHip: 0.45 },
+      strike: { bSh: 1.62, bEl: 1.62, fSh: 0.05, fEl: 0.0, lean: 0.78, hipH: 98, bHip: -0.68, fHip: 0.84, fKnee: 0.45 },
     };
   }
   if (move.pose === "kick") {
@@ -493,9 +496,9 @@ function moveKeyframes(move) {
       strike: { fSh: 2.72, fEl: 3.05, bSh: 1.25, bEl: 1.95, lean: 0.16, hipH: 122, bHip: -0.2, fHip: 0.22, bKnee: 0.0, fKnee: 0.0 },
     };
   }
-  // push (ultimate)：両手を引き絞って前へ突き出す
+  // push (ultimate)：両手を腰だめに大きく引き絞ってから前へ突き出す
   return {
-    windup: { fSh: 0.4, fEl: 0.2, bSh: 0.4, bEl: 0.2, lean: -0.38, hipH: 80, bHip: -0.5, fHip: 0.62 },
+    windup: { fSh: -0.45, fEl: -1.05, bSh: -0.4, bEl: -1.0, lean: -0.5, hipH: 78, bHip: -0.55, fHip: 0.55 },
     strike: { fSh: 1.5, fEl: 1.5, bSh: 1.5, bEl: 1.5, lean: 0.52, hipH: 100, bHip: -0.55, fHip: 0.72 },
   };
 }
