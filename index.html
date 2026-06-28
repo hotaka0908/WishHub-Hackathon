@@ -309,6 +309,19 @@ const Audio_ = (() => {
       setTimeout(() => { tone("sawtooth", 700, 90, 0.4, 0.3); }, 120);
     },
     fire() { ensure(); tone("sine", 600, 160, 0.3, 0.22); noise(0.18, 0.2, 2200, 400); },
+    // 必殺技の着弾＝大爆発（シネマ演出と同時に鳴らす）
+    ultBoom() {
+      ensure();
+      const B = punchBus;
+      thump(280, 28, 0.75, 1.0);                 // 爆発の芯（ドゴォン）
+      thump(78, 20, 1.1, 0.75);                  // 地を揺らすサブ
+      pop(0.75, 6200, 0.32, B);                  // 派手な破裂
+      crunch(0.42, 0.6, 3200, 280, 10, B);       // 砕ける爆風
+      noise(0.5, 0.4, 6500, 300, B);             // 広がる轟音
+      tok(130, 5, 0.5, 0.5, B);                  // 共鳴する芯
+      tone("sawtooth", 760, 70, 0.6, 0.3, B);    // 落ちるエネルギー
+      setTimeout(() => { if (ac) { thump(66, 18, 0.85, 0.55); noise(0.4, 0.28, 4200, 200, B); } }, 120); // 余韻の轟き
+    },
     ko() {
       ensure();
       const B = punchBus;
@@ -684,7 +697,8 @@ class Fighter {
     const juice = 1 + (cc - 1) * 0.14;
 
     if (isUlt) {
-      // ===== 必殺技ヒット：超派手・シネマ演出 =====
+      // ===== 必殺技ヒット：超派手・シネマ演出＋大爆発音 =====
+      Audio_.ultBoom();                                     // 演出と同時に爆発音
       game.hitstop = Math.max(game.hitstop, 0.38);          // ガッと止める（インパクト）
       game.setSlow(1.05, 0.11);                             // 深く長いスローモー
       game.cineZoom(0.9, hx, hy, 0.40);                     // 衝撃点へ大ズーム
