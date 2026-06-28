@@ -16,11 +16,73 @@
     border-radius:6px; background:#000; }
   #hint { position:fixed; bottom:8px; left:0; right:0; text-align:center; color:#7e87b5;
     font-size:12px; letter-spacing:.5px; pointer-events:none; user-select:none; }
+  /* ---- オンライン対戦ロビー（DOMオーバーレイ） ---- */
+  .overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(4,6,13,.78); z-index:20; }
+  .overlay.hidden { display:none; }
+  .panel { background:linear-gradient(160deg,#161a2e,#0c0e1c); border:1px solid rgba(120,160,255,.28);
+    border-radius:14px; padding:30px 34px; width:min(440px,90vw); text-align:center;
+    box-shadow:0 12px 50px rgba(0,0,0,.6), 0 0 0 1px rgba(120,160,255,.08);
+    color:#dfe6ff; font-family:inherit; }
+  .panel h2 { font-size:24px; margin-bottom:18px; letter-spacing:1px;
+    background:linear-gradient(90deg,#9fe8ff,#5aa6ff,#ff5bd0); -webkit-background-clip:text;
+    background-clip:text; color:transparent; }
+  .panel .row { display:flex; gap:8px; margin:12px 0; }
+  .panel button { width:100%; padding:13px 16px; margin:7px 0; border:none; border-radius:9px;
+    font-size:16px; font-weight:700; cursor:pointer; color:#06101f;
+    background:linear-gradient(180deg,#7fd0ff,#3da6ff); transition:transform .06s, filter .12s; }
+  .panel button:hover { filter:brightness(1.1); }
+  .panel button:active { transform:translateY(1px); }
+  .panel button.ghost { background:transparent; color:#9fb4e0; border:1px solid rgba(120,160,255,.3); }
+  .panel button:disabled { opacity:.45; cursor:default; filter:none; }
+  .panel input { flex:1; padding:12px 14px; border-radius:9px; border:1px solid rgba(120,160,255,.35);
+    background:#0a0d1a; color:#fff; font-size:20px; font-weight:700; letter-spacing:4px;
+    text-align:center; text-transform:uppercase; outline:none; }
+  .panel input::placeholder { color:#566; letter-spacing:1px; font-weight:400; }
+  #statusText { font-size:15px; color:#bcd6ff; margin:6px 0 14px; min-height:20px; }
+  #roomCode { font-size:40px; font-weight:900; letter-spacing:10px; margin:8px 0 18px;
+    color:#ffd23d; text-shadow:0 0 18px rgba(255,210,61,.5); }
+  #roomCode.hidden, #btnStart.hidden, #lobbyHome.hidden, #lobbyStatus.hidden,
+  #btnRematch.hidden { display:none; }
+  .hint-sm { font-size:12px; color:#7e87b5; margin-top:10px; }
 </style>
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
 <div id="hint">1P: A/D 移動・F 攻撃 ｜ 2P: ←→ 移動・／ 攻撃 ｜ Enter 決定/リスタート</div>
+
+<!-- オンライン対戦ロビー -->
+<div id="lobby" class="overlay hidden">
+  <div class="panel">
+    <h2>オンライン対戦</h2>
+    <div id="lobbyHome">
+      <button id="btnHost">部屋を作る（ホスト）</button>
+      <div class="row">
+        <input id="codeInput" maxlength="4" placeholder="部屋コード" />
+        <button id="btnJoin" style="width:auto;padding-left:22px;padding-right:22px;">参加</button>
+      </div>
+      <button id="btnBack" class="ghost">戻る</button>
+      <div class="hint-sm">同じ部屋コードを相手に伝えて接続します</div>
+    </div>
+    <div id="lobbyStatus" class="hidden">
+      <div id="statusText">…</div>
+      <div id="roomCode" class="hidden"></div>
+      <button id="btnStart" class="hidden">対戦開始</button>
+      <button id="btnCancel" class="ghost">キャンセル</button>
+    </div>
+  </div>
+</div>
+
+<!-- 試合終了（オンライン） -->
+<div id="rematch" class="overlay hidden">
+  <div class="panel">
+    <h2 id="rematchText">試合終了</h2>
+    <button id="btnRematch" class="hidden">もう一度たたかう</button>
+    <button id="btnExit" class="ghost">退出する</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <script>
 "use strict";
 /* =====================================================================
@@ -140,13 +202,13 @@ const Audio_ = (() => {
       ensure();
       const s = strength; // 0=軽い / 1=重い
       // ドスッ：当たった衝撃の芯（パンチの効いた低中音ボディ）
-      thump(200 + 50 * s, 58, 0.16 + 0.06 * s, 0.62 + 0.16 * s);
+      thump(205 + 50 * s, 58, 0.17 + 0.06 * s, 0.68 + 0.16 * s);
       // バキッ：肉・骨に効く中音の歪んだ衝撃（“当てた感”の主役）
-      crunch(0.09 + 0.03 * s, 0.5 + 0.18 * s, 2200 + 300 * s, 650, 12 + 9 * s);
+      crunch(0.1 + 0.03 * s, 0.56 + 0.18 * s, 2400 + 300 * s, 650, 13 + 9 * s);
       // ゴッ：当たりに厚みを出す中低音スナップ
-      tone("square", 180 + 40 * s, 70, 0.08 + 0.02 * s, 0.3);
-      // 当たりの輪郭づけ（高音は控えめ）
-      crack(0.03, 0.18 + 0.06 * s, 4800, 2600);
+      tone("square", 190 + 40 * s, 70, 0.09 + 0.02 * s, 0.33);
+      // パツッ：当たりの輪郭（弱パンチはシャリつかせず、強打ほど明るく）
+      crack(0.026, 0.07 + 0.14 * s, 3000 + 1800 * s, 1700);
       // 重い一撃：さらに重い追い打ち “ドガッ”
       if (s) { thump(115, 46, 0.24, 0.48); crunch(0.07, 0.34, 1500, 480, 16); }
     },
@@ -208,10 +270,17 @@ const Input = (() => {
   const q1 = [], q2 = [];          // 各プレイヤーの攻撃イベント
   let enterPressed = false;
   let menuNav = 0, digitPick = -1; // タイトルのメニュー操作
+  let onlineAttack = false;        // オンライン：このフレームに攻撃入力があったか
   let mode = "cpu";
   function setMode(m) { mode = m; }
+  // フォーカスがテキスト入力（ロビーの部屋コード欄）にある時はゲーム操作を無効化
+  function typingInField() {
+    const el = document.activeElement;
+    return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+  }
 
   window.addEventListener("keydown", (e) => {
+    if (typingInField()) return;     // コード入力中はキーを奪わない
     Audio_.resume();
     const code = e.code, key = e.key;
     if (key === "Enter") { enterPressed = true; e.preventDefault(); return; }
@@ -219,9 +288,22 @@ const Input = (() => {
     if (code === "ArrowUp" || code === "ArrowDown") { menuNav = code === "ArrowUp" ? -1 : 1; e.preventDefault(); return; }
     if (key === "1") { digitPick = 0; e.preventDefault(); return; }
     if (key === "2") { digitPick = 1; e.preventDefault(); return; }
+    if (key === "3") { digitPick = 2; e.preventDefault(); return; }
+
+    if (mode === "online") {
+      // 移動：←→ / A D どちらでもOK（ローカルは1人なので寛容に）
+      if (code === "ArrowLeft" || code === "ArrowRight" || code === "KeyA" || code === "KeyD") {
+        keys[code] = true; e.preventDefault(); return;
+      }
+      if (e.repeat) return;
+      if (code === "KeyF" || code === "KeyG" || code === "KeyV" || code === "KeyJ" || code === "Space" || code === "Slash") {
+        e.preventDefault(); onlineAttack = true; return;
+      }
+      return;
+    }
+
     // 矢印（左右）は常に押下状態として保持（CPU戦の1P / 対戦の2P 移動）
     if (code === "ArrowLeft" || code === "ArrowRight") { keys[code] = true; e.preventDefault(); return; }
-
     if (mode === "vs") {
       if (code === "KeyA" || code === "KeyD") { keys[code] = true; e.preventDefault(); return; }
       if (e.repeat) return;
@@ -252,8 +334,14 @@ const Input = (() => {
   function consumeNav() { const v = menuNav; menuNav = 0; return v; }
   function consumeDigit() { const v = digitPick; digitPick = -1; return v; }
   function anyKeyCharging() { return false; }
+  // オンライン：このフレームのローカル入力を1サンプル取り出す（攻撃エッジは消費）
+  function sampleLocal() {
+    const move = ((keys["ArrowRight"] || keys["KeyD"]) ? 1 : 0) - ((keys["ArrowLeft"] || keys["KeyA"]) ? 1 : 0);
+    const attack = onlineAttack; onlineAttack = false;
+    return { move, attack };
+  }
   return { update, setMode, moveDir1, moveDir2, takeEvents1, takeEvents2,
-           consumeEnter, consumeNav, consumeDigit, anyKeyCharging };
+           consumeEnter, consumeNav, consumeDigit, anyKeyCharging, sampleLocal };
 })();
 
 /* =====================================================================
@@ -1582,8 +1670,12 @@ class Game {
       colors: {
       skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } });
     this.ai = { timer: 0, action: "idle", moveDir: 0, level: 1 };
-    this.mode = "cpu";           // cpu = 対CPU / vs = 2人対戦
-    this.menuIndex = 0;          // タイトルの選択（0=CPU戦 / 1=2人対戦）
+    this.mode = "cpu";           // cpu = 対CPU / vs = ローカル2人 / vs+online = オンライン
+    this.menuIndex = 0;          // タイトルの選択（0=CPU / 1=ローカル2人 / 2=オンライン）
+    this.online = false;         // オンライン対戦中か
+    this.netRole = null;         // 'host'(=1P) / 'guest'(=2P)
+    this._oi1 = { move: 0, attack: false };  // オンライン適用入力（P1/P2）
+    this._oi2 = { move: 0, attack: false };
     this.state = "title";        // title / ready / fight / roundEnd / matchEnd
     this.wins = [0, 0];
     this.round = 1;
@@ -1604,14 +1696,46 @@ class Game {
   }
   startMatch() {
     this.wins = [0, 0]; this.round = 1;
-    Input.setMode(this.mode);
+    Input.setMode(this.online ? "online" : this.mode);
     // モードに応じてP2をCPU/人間に、名前も切替
     this.p2.isCPU = (this.mode === "cpu");
-    this.p1.name = (this.mode === "cpu") ? "あなた" : "1P";
-    this.p2.name = (this.mode === "cpu") ? "CPU" : "2P";
+    if (this.online) {
+      // ホスト=1P(左)/ゲスト=2P(右)。各画面で自分側に「あなた」
+      this.p1.name = this.netRole === "host" ? "あなた" : "あいて";
+      this.p2.name = this.netRole === "guest" ? "あなた" : "あいて";
+    } else {
+      this.p1.name = (this.mode === "cpu") ? "あなた" : "1P";
+      this.p2.name = (this.mode === "cpu") ? "CPU" : "2P";
+    }
     this.p1.comboIndex = 0; this.p2.comboIndex = 0;  // 新しい試合のみ攻撃ループを最初から
     Audio_.startBGM();
     this.startRound();
+  }
+  // オンライン対戦の開始（Net から呼ばれる。両者で同時に同じ初期状態へ）
+  startOnline(role) {
+    this.online = true; this.netRole = role; this.mode = "vs";
+    this.startMatch();
+  }
+  // オンライン対戦の終了 → タイトルへ
+  endOnline() {
+    this.online = false; this.netRole = null;
+    this.state = "title"; this.menuIndex = 2;
+    Audio_.stopBGM();
+  }
+  // Net が各フレーム適用する入力（P1=host側 / P2=guest側）
+  setOnlineInputs(in1, in2) { this._oi1 = in1; this._oi2 = in2; }
+  // 明示入力を両ファイターへ反映（オンライン用）
+  applyInputs(in1, in2) {
+    this.p1.walk(in1.move, this.p2);
+    if (in1.attack) this.p1.request("normal");
+    this.p2.walk(in2.move, this.p1);
+    if (in2.attack) this.p2.request("normal");
+  }
+  // タイトルメニューの決定
+  confirmMenu() {
+    if (this.menuIndex === 0) { this.mode = "cpu"; this.online = false; this.startMatch(); }
+    else if (this.menuIndex === 1) { this.mode = "vs"; this.online = false; this.startMatch(); }
+    else { this.online = true; openLobby(); }   // オンライン：ロビーを開く
   }
   startRound() {
     this.p1.reset(1); this.p2.reset(-1);
@@ -1723,18 +1847,19 @@ class Game {
     this.t += dt;
     Input.update();
 
-    // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで開始
+    // タイトル：↑↓でモード選択 / 1・2・3で直接選択 / Enterで決定
     if (this.state === "title") {
       const nav = Input.consumeNav();
-      if (nav) this.menuIndex = (this.menuIndex + nav + 2) % 2;
+      if (nav) this.menuIndex = (this.menuIndex + nav + 3) % 3;
       const d = Input.consumeDigit();
-      if (d >= 0) { this.menuIndex = d; this.mode = d === 0 ? "cpu" : "vs"; this.startMatch(); return; }
-      if (Input.consumeEnter()) { this.mode = this.menuIndex === 0 ? "cpu" : "vs"; this.startMatch(); }
+      if (d >= 0) { this.menuIndex = d; this.confirmMenu(); return; }
+      if (Input.consumeEnter()) { this.confirmMenu(); }
       return;
     }
     if (this.state === "matchEnd") {
       this.bannerT -= dt;
-      if (Input.consumeEnter()) { this.state = "title"; Audio_.stopBGM(); }
+      // オンラインは DOM の「もう一度/退出」で進める（Enterは無効）
+      if (!this.online && Input.consumeEnter()) { this.state = "title"; Audio_.stopBGM(); }
       return;
     }
 
@@ -1755,15 +1880,20 @@ class Game {
     } else if (this.state === "fight") {
       this.bannerT -= dt;
       this.timer -= dt;
-      // 1P 入力
-      this.p1.walk(Input.moveDir1(), this.p2);
-      for (const ev of Input.takeEvents1()) this.p1.request(ev.kind, ev.g);
-      // 2P 入力（対戦） / CPU（CPU戦）
-      if (this.mode === "vs") {
-        this.p2.walk(Input.moveDir2(), this.p1);
-        for (const ev of Input.takeEvents2()) this.p2.request(ev.kind, ev.g);
+      if (this.online) {
+        // オンライン：ロックステップで配られた入力を両者へ適用
+        this.applyInputs(this._oi1, this._oi2);
       } else {
-        this.updateAI(sdt);
+        // 1P 入力
+        this.p1.walk(Input.moveDir1(), this.p2);
+        for (const ev of Input.takeEvents1()) this.p1.request(ev.kind, ev.g);
+        // 2P 入力（ローカル対戦） / CPU（CPU戦）
+        if (this.mode === "vs") {
+          this.p2.walk(Input.moveDir2(), this.p1);
+          for (const ev of Input.takeEvents2()) this.p2.request(ev.kind, ev.g);
+        } else {
+          this.updateAI(sdt);
+        }
       }
 
       this.p1.update(sdt, this.p2, this);
@@ -1791,7 +1921,11 @@ class Game {
       if (this.bannerT <= 0) {
         if (this.wins[0] >= 2 || this.wins[1] >= 2) {
           this.state = "matchEnd";
-          if (this.mode === "cpu") this.banner = this.wins[0] >= 2 ? "YOU WIN!" : "YOU LOSE";
+          if (this.online) {
+            const youWon = (this.netRole === "host") === (this.wins[0] >= 2);
+            this.banner = youWon ? "YOU WIN!" : "YOU LOSE";
+            onMatchEndOnline(this.netRole === "host");   // DOM の もう一度/退出 を表示
+          } else if (this.mode === "cpu") this.banner = this.wins[0] >= 2 ? "YOU WIN!" : "YOU LOSE";
           else this.banner = (this.wins[0] >= 2 ? this.p1.name : this.p2.name) + " WINS!";
           this.bannerT = 999;
           Audio_.round();
@@ -1863,10 +1997,11 @@ class Game {
 
     // モード選択メニュー
     const opts = [
-      { t: "1  CPU と対戦", y: H * 0.50 },
-      { t: "2  2人で対戦", y: H * 0.58 },
+      { t: "1  CPU と対戦", y: H * 0.47 },
+      { t: "2  2人で対戦（同じPC）", y: H * 0.55 },
+      { t: "3  オンライン対戦", y: H * 0.63 },
     ];
-    ctx.font = "bold 34px system-ui";
+    ctx.font = "bold 32px system-ui";
     for (let i = 0; i < opts.length; i++) {
       const sel = this.menuIndex === i;
       ctx.fillStyle = sel ? "#ffd23d" : "rgba(255,255,255,.55)";
@@ -1875,10 +2010,10 @@ class Game {
     }
     // 操作説明
     ctx.font = "bold 17px system-ui"; ctx.fillStyle = "#9fb4e0";
-    ctx.fillText("↑↓で選択 ・ Enter / 数字キー で決定", W / 2, H * 0.68);
-    ctx.font = "15px system-ui"; ctx.fillStyle = "#7e87b5";
-    ctx.fillText("CPU戦  1P: ← → 移動 / 文字キー 攻撃", W / 2, H * 0.78);
-    ctx.fillText("対戦  1P: A D 移動・F 攻撃   2P: ← → 移動・／ 攻撃", W / 2, H * 0.82);
+    ctx.fillText("↑↓で選択 ・ Enter / 数字キー で決定", W / 2, H * 0.73);
+    ctx.font = "14px system-ui"; ctx.fillStyle = "#7e87b5";
+    ctx.fillText("CPU戦  1P: ←→ 移動 / 文字キー 攻撃", W / 2, H * 0.81);
+    ctx.fillText("ローカル対戦  1P: A D・F   2P: ←→・／   ｜  オンライン  移動: ←→/AD  攻撃: F/Space", W / 2, H * 0.85);
     ctx.restore();
   }
 
@@ -1922,7 +2057,7 @@ class Game {
 
     this.drawHUD(ctx);
     this.drawBanner(ctx);
-    if (this.state === "matchEnd") {
+    if (this.state === "matchEnd" && !this.online) {
       ctx.save(); ctx.textAlign = "center"; ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
       if (Math.sin(this.t * 4) > -0.3) ctx.fillText("Press ENTER", W / 2, H / 2 + 70);
       ctx.restore();
