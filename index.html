@@ -20,7 +20,7 @@
 </head>
 <body>
 <div id="wrap"><canvas id="game" width="1280" height="720"></canvas></div>
-<div id="hint">Enter 決定 / リスタート</div>
+<div id="hint">1P: A/D 移動・F 攻撃 ｜ 2P: ←→ 移動・／ 攻撃 ｜ Enter 決定/リスタート</div>
 <script>
 "use strict";
 /* =====================================================================
@@ -186,42 +186,61 @@ const Audio_ = (() => {
 })();
 
 /* =====================================================================
-   INPUT — A〜Z連打で通常技のみ（2回連続・長押しは廃止）
+   INPUT — 連打で通常技。CPU戦/2人対戦でキー配置を切替
+     CPU戦  : 1P=矢印で移動 / どの文字キーでも攻撃（従来どおり）
+     2人対戦: 1P=A/D移動・F(or Space)攻撃 ／ 2P=←→移動・／(or 右Shift)攻撃
    ===================================================================== */
 const Input = (() => {
-  const keys = {};                 // 押下状態
-  const queue = [];                // プレイヤーの攻撃イベント
+  const keys = {};                 // 押下状態（e.code をキーに）
+  const q1 = [], q2 = [];          // 各プレイヤーの攻撃イベント
   let enterPressed = false;
-
-  function group(k) {
-    const i = k.charCodeAt(0) - 97;            // a=0
-    if (i < 5) return 0; if (i < 10) return 1; if (i < 15) return 2; if (i < 20) return 3; return 4;
-  }
+  let menuNav = 0, digitPick = -1; // タイトルのメニュー操作
+  let mode = "cpu";
+  function setMode(m) { mode = m; }
 
   window.addEventListener("keydown", (e) => {
     Audio_.resume();
-    const key = e.key;
-    if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = true; e.preventDefault(); return; }
+    const code = e.code, key = e.key;
     if (key === "Enter") { enterPressed = true; e.preventDefault(); return; }
-    if (/^[a-zA-Z]$/.test(key)) {
-      e.preventDefault();
+    // タイトル用：上下でメニュー移動、数字で直接選択
+    if (code === "ArrowUp" || code === "ArrowDown") { menuNav = code === "ArrowUp" ? -1 : 1; e.preventDefault(); return; }
+    if (key === "1") { digitPick = 0; e.preventDefault(); return; }
+    if (key === "2") { digitPick = 1; e.preventDefault(); return; }
+    // 矢印（左右）は常に押下状態として保持（CPU戦の1P / 対戦の2P 移動）
+    if (code === "ArrowLeft" || code === "ArrowRight") { keys[code] = true; e.preventDefault(); return; }
+
+    if (mode === "vs") {
+      if (code === "KeyA" || code === "KeyD") { keys[code] = true; e.preventDefault(); return; }
       if (e.repeat) return;
-      // 押した瞬間に通常技を発生（連打で5種ループ）。特別技・必殺技の手動入力はなし。
-      queue.push({ kind: "normal", g: group(key.toLowerCase()) });
+      if (code === "KeyF" || code === "KeyG" || code === "KeyV" || code === "Space") { e.preventDefault(); q1.push({ kind: "normal" }); return; }
+      if (code === "Slash" || code === "Period" || code === "ShiftRight") { e.preventDefault(); q2.push({ kind: "normal" }); return; }
+    } else {
+      if (e.repeat) return;
+      if (/^[a-zA-Z]$/.test(key)) { e.preventDefault(); q1.push({ kind: "normal" }); return; }
     }
   });
   window.addEventListener("keyup", (e) => {
-    const key = e.key;
-    if (key === "ArrowLeft" || key === "ArrowRight") { keys[key] = false; return; }
+    const code = e.code;
+    if (code === "ArrowLeft" || code === "ArrowRight" || code === "KeyA" || code === "KeyD") keys[code] = false;
   });
   window.addEventListener("blur", () => { for (const k in keys) keys[k] = false; });
 
   function update() {}
-  function moveDir() { return (keys["ArrowRight"] ? 1 : 0) - (keys["ArrowLeft"] ? 1 : 0); }
-  function anyKeyCharging() { return false; }
-  function takeEvents() { const q = queue.slice(); queue.length = 0; return q; }
+  // 1P の移動：対戦ではA/D、CPU戦では矢印
+  function moveDir1() {
+    if (mode === "vs") return (keys["KeyD"] ? 1 : 0) - (keys["KeyA"] ? 1 : 0);
+    return (keys["ArrowRight"] ? 1 : 0) - (keys["ArrowLeft"] ? 1 : 0);
+  }
+  // 2P の移動（対戦のみ）：矢印
+  function moveDir2() { return (keys["ArrowRight"] ? 1 : 0) - (keys["ArrowLeft"] ? 1 : 0); }
+  function takeEvents1() { const q = q1.slice(); q1.length = 0; return q; }
+  function takeEvents2() { const q = q2.slice(); q2.length = 0; return q; }
   function consumeEnter() { const v = enterPressed; enterPressed = false; return v; }
-  return { update, moveDir, takeEvents, consumeEnter, anyKeyCharging };
+  function consumeNav() { const v = menuNav; menuNav = 0; return v; }
+  function consumeDigit() { const v = digitPick; digitPick = -1; return v; }
+  function anyKeyCharging() { return false; }
+  return { update, setMode, moveDir1, moveDir2, takeEvents1, takeEvents2,
+           consumeEnter, consumeNav, consumeDigit, anyKeyCharging };
 })();
 
 /* =====================================================================
@@ -1511,6 +1530,8 @@ class Game {
       colors: {
       skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } });
     this.ai = { timer: 0, action: "idle", moveDir: 0, level: 1 };
+    this.mode = "cpu";           // cpu = 対CPU / vs = 2人対戦
+    this.menuIndex = 0;          // タイトルの選択（0=CPU戦 / 1=2人対戦）
     this.state = "title";        // title / ready / fight / roundEnd / matchEnd
     this.wins = [0, 0];
     this.round = 1;
@@ -1531,6 +1552,11 @@ class Game {
   }
   startMatch() {
     this.wins = [0, 0]; this.round = 1;
+    Input.setMode(this.mode);
+    // モードに応じてP2をCPU/人間に、名前も切替
+    this.p2.isCPU = (this.mode === "cpu");
+    this.p1.name = (this.mode === "cpu") ? "あなた" : "1P";
+    this.p2.name = (this.mode === "cpu") ? "CPU" : "2P";
     this.p1.comboIndex = 0; this.p2.comboIndex = 0;  // 新しい試合のみ攻撃ループを最初から
     Audio_.startBGM();
     this.startRound();
@@ -1554,7 +1580,8 @@ class Game {
     const winnerIdx = loser === this.p1 ? 1 : 0;
     this.wins[winnerIdx]++;
     this.state = "roundEnd";
-    this.banner = (winnerIdx === 0 ? "あなたの勝ち！" : "CPUの勝ち");
+    const wname = winnerIdx === 0 ? this.p1.name : this.p2.name;
+    this.banner = wname + " の勝ち！";
     this.bannerT = 2.6;
     this.slow = 1.2;
   }
@@ -1644,9 +1671,13 @@ class Game {
     this.t += dt;
     Input.update();
 
-    // タイトル / 結果 → Enterで進行
+    // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで開始
     if (this.state === "title") {
-      if (Input.consumeEnter()) this.startMatch();
+      const nav = Input.consumeNav();
+      if (nav) this.menuIndex = (this.menuIndex + nav + 2) % 2;
+      const d = Input.consumeDigit();
+      if (d >= 0) { this.menuIndex = d; this.mode = d === 0 ? "cpu" : "vs"; this.startMatch(); return; }
+      if (Input.consumeEnter()) { this.mode = this.menuIndex === 0 ? "cpu" : "vs"; this.startMatch(); }
       return;
     }
     if (this.state === "matchEnd") {
@@ -1672,12 +1703,16 @@ class Game {
     } else if (this.state === "fight") {
       this.bannerT -= dt;
       this.timer -= dt;
-      // プレイヤー入力
-      const dir = Input.moveDir();
-      this.p1.walk(dir, this.p2);
-      for (const ev of Input.takeEvents()) this.p1.request(ev.kind, ev.g);
-      // AI
-      this.updateAI(sdt);
+      // 1P 入力
+      this.p1.walk(Input.moveDir1(), this.p2);
+      for (const ev of Input.takeEvents1()) this.p1.request(ev.kind, ev.g);
+      // 2P 入力（対戦） / CPU（CPU戦）
+      if (this.mode === "vs") {
+        this.p2.walk(Input.moveDir2(), this.p1);
+        for (const ev of Input.takeEvents2()) this.p2.request(ev.kind, ev.g);
+      } else {
+        this.updateAI(sdt);
+      }
 
       this.p1.update(sdt, this.p2, this);
       this.p2.update(sdt, this.p1, this);
@@ -1692,7 +1727,7 @@ class Game {
         if (w === -1) { this.wins[0]++; this.wins[1]++; }
         else this.wins[w]++;
         this.state = "roundEnd";
-        this.banner = w === -1 ? "DRAW" : (w === 0 ? "あなたの勝ち！" : "CPUの勝ち");
+        this.banner = w === -1 ? "DRAW" : ((w === 0 ? this.p1.name : this.p2.name) + " の勝ち！");
         this.bannerT = 2.6;
       }
     } else if (this.state === "roundEnd") {
@@ -1704,7 +1739,8 @@ class Game {
       if (this.bannerT <= 0) {
         if (this.wins[0] >= 2 || this.wins[1] >= 2) {
           this.state = "matchEnd";
-          this.banner = this.wins[0] >= 2 ? "YOU WIN!" : "YOU LOSE";
+          if (this.mode === "cpu") this.banner = this.wins[0] >= 2 ? "YOU WIN!" : "YOU LOSE";
+          else this.banner = (this.wins[0] >= 2 ? this.p1.name : this.p2.name) + " WINS!";
           this.bannerT = 999;
           Audio_.round();
         } else { this.round++; this.startRound(); }
@@ -1734,9 +1770,13 @@ class Game {
     this.drawBar(ctx, 40, my + bh + 8, bw * 0.7, 10, this.p1.meter / MAX_METER, "#ffd23d", false);
     this.drawBar(ctx, W - 40 - bw * 0.7, my + bh + 8, bw * 0.7, 10, this.p2.meter / MAX_METER, "#ffd23d", true);
     // 次に出る技（ループ位置）
-    ctx.font = "bold 15px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = "#bcd6ff";
+    ctx.font = "bold 15px system-ui"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#bcd6ff"; ctx.textAlign = "left";
     ctx.fillText("NEXT ▶ " + NORMALS[this.p1.comboIndex % NORMALS.length].name, 42, my + bh + 36);
+    if (this.mode === "vs") {
+      ctx.fillStyle = "#ffc2c2"; ctx.textAlign = "right";
+      ctx.fillText("◀ NEXT " + NORMALS[this.p2.comboIndex % NORMALS.length].name, W - 42, my + bh + 36);
+    }
     // 名前
     ctx.fillStyle = "#fff"; ctx.font = "bold 20px system-ui"; ctx.textBaseline = "alphabetic";
     ctx.textAlign = "left"; ctx.fillText(this.p1.name, 42, my - 8);
@@ -1772,13 +1812,29 @@ class Game {
     ctx.save(); ctx.textAlign = "center";
     ctx.font = "900 110px system-ui";
     ctx.lineWidth = 10; ctx.strokeStyle = "#10081a";
-    ctx.strokeText("NEON FIST", W / 2, H * 0.34);
-    const g = ctx.createLinearGradient(0, H * 0.34 - 60, 0, H * 0.34 + 30);
+    ctx.strokeText("NEON FIST", W / 2, H * 0.30);
+    const g = ctx.createLinearGradient(0, H * 0.30 - 60, 0, H * 0.30 + 30);
     g.addColorStop(0, "#9fe8ff"); g.addColorStop(0.5, "#5aa6ff"); g.addColorStop(1, "#ff5bd0");
-    ctx.fillStyle = g; ctx.fillText("NEON FIST", W / 2, H * 0.34);
-    ctx.font = "bold 26px system-ui"; ctx.fillStyle = "#fff";
-    const blink = Math.sin(this.t * 4) > -0.3;
-    if (blink) ctx.fillText("Press ENTER to Fight", W / 2, H * 0.52);
+    ctx.fillStyle = g; ctx.fillText("NEON FIST", W / 2, H * 0.30);
+
+    // モード選択メニュー
+    const opts = [
+      { t: "1  CPU と対戦", y: H * 0.50 },
+      { t: "2  2人で対戦", y: H * 0.58 },
+    ];
+    ctx.font = "bold 34px system-ui";
+    for (let i = 0; i < opts.length; i++) {
+      const sel = this.menuIndex === i;
+      ctx.fillStyle = sel ? "#ffd23d" : "rgba(255,255,255,.55)";
+      const label = (sel ? "▶  " : "    ") + opts[i].t;
+      ctx.fillText(label, W / 2, opts[i].y);
+    }
+    // 操作説明
+    ctx.font = "bold 17px system-ui"; ctx.fillStyle = "#9fb4e0";
+    ctx.fillText("↑↓で選択 ・ Enter / 数字キー で決定", W / 2, H * 0.68);
+    ctx.font = "15px system-ui"; ctx.fillStyle = "#7e87b5";
+    ctx.fillText("CPU戦  1P: ← → 移動 / 文字キー 攻撃", W / 2, H * 0.78);
+    ctx.fillText("対戦  1P: A D 移動・F 攻撃   2P: ← → 移動・／ 攻撃", W / 2, H * 0.82);
     ctx.restore();
   }
 
