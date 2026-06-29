@@ -2743,10 +2743,11 @@ class Game {
         const r = this.lastResult;
         ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         const lx = 44, ly = 112;
-        // 「+◯ pt」を弾ませる：登場時にドンと大きく → 落ち着いてからポンポン跳ねる
+        // 「+◯ pt」を弾ませる：登場でドンと大きく → ポンポン跳ねて約2秒で止まる
         const age = Math.max(0, this.t - (this.lastResultStart || 0));
-        const pop = age < 0.45 ? 1 + 0.9 * (1 - age / 0.45) : 1;       // 登場のオーバーシュート
-        const bounce = Math.pow(Math.abs(Math.sin(this.t * 4.5)), 0.7); // 継続的な弾み
+        const pop = age < 0.45 ? 1 + 0.9 * (1 - age / 0.45) : 1;        // 登場のオーバーシュート
+        const decay = Math.max(0, 1 - age / 2.0);                       // 約2秒かけて弾みが減衰→停止
+        const bounce = Math.pow(Math.abs(Math.sin(this.t * 4.5)), 0.7) * decay;
         const sc = pop * (1 + bounce * 0.14);
         const hop = -bounce * 7;
         ctx.save();
