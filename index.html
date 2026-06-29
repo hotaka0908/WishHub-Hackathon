@@ -549,6 +549,8 @@ const Input = (() => {
   function consumeNav() { const v = menuNav; menuNav = 0; return v; }
   function consumeH() { const v = menuH; menuH = 0; return v; }
   function consumeDigit() { const v = digitPick; digitPick = -1; return v; }
+  // メニュー系ラッチを一括クリア（状態遷移時に呼んで、溜まった入力の誤爆を防ぐ）
+  function clearMenu() { enterPressed = false; escPressed = false; menuNav = 0; menuH = 0; digitPick = -1; }
   function anyKeyCharging() { return false; }
   // オンライン：このフレームのローカル入力を1サンプル取り出す（攻撃エッジは消費）
   function sampleLocal() {
@@ -557,7 +559,7 @@ const Input = (() => {
     return { move, attack };
   }
   return { update, setMode, moveDir1, moveDir2, takeEvents1, takeEvents2,
-           consumeEnter, consumeEsc, consumeNav, consumeH, consumeDigit, anyKeyCharging, sampleLocal };
+           consumeEnter, consumeEsc, consumeNav, consumeH, consumeDigit, clearMenu, anyKeyCharging, sampleLocal };
 })();
 
 /* =====================================================================
@@ -2055,6 +2057,7 @@ class Game {
     this.fx.combo(n, col, x, y);
   }
   startMatch() {
+    Input.clearMenu();                            // 溜まったメニュー入力を破棄（試合開始直後の誤爆防止）
     this.wins = [0, 0]; this.round = 1;
     this.ai.level = this.aiLevel;                 // 選んだ難易度を反映
     // 強さの主軸 = 打たれ強さ(防御) と 俊敏さ。Lv1=脆い/鈍い → Lv5=半減ダメ/俊敏
@@ -2095,6 +2098,7 @@ class Game {
     if (this.online) { try { Net.leave(); } catch (e) {} this.endOnline(); }
     this.online = false; this.state = "title";
     Audio_.stopBGM(); Audio_.stopWaitBGM();
+    Input.clearMenu();
     if (typeof hide === "function") { hide(rematchEl); hide(lobbyEl); }
   }
   // Net が各フレーム適用する入力（P1=host側 / P2=guest側）
@@ -2269,9 +2273,13 @@ class Game {
 
     // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで決定
     if (this.state === "title") {
-      // ロビー表示中に Esc → ロビーを閉じる（キャンセル）
-      if (Input.consumeEsc() && typeof lobbyEl !== "undefined" && !lobbyEl.classList.contains("hidden")) { closeLobbyToTitle(); return; }
-      const nav = Input.consumeNav() || Input.consumeH();
+      // ロビー表示中はメニュー操作を裏に通さない（Escでキャンセルのみ）
+      if (typeof lobbyEl !== "undefined" && !lobbyEl.classList.contains("hidden")) {
+        const esc = Input.consumeEsc(); Input.clearMenu();
+        if (esc) closeLobbyToTitle();
+        return;
+      }
+      const a = Input.consumeNav(), b = Input.consumeH(); const nav = a || b;  // 両方クリアして取り出す
       if (nav) { this.menuIndex = (this.menuIndex + nav + 2) % 2; Audio_.uiMove(); }
       const d = Input.consumeDigit();
       if (d === 0 || d === 1) { this.menuIndex = d; Audio_.uiConfirm(); this.confirmMenu(); return; }
@@ -2280,8 +2288,8 @@ class Game {
     }
     // 難易度選択：←→（↑↓も可）でCPUレベル変更 / 1〜5で直接 / Enterで開始 / Escで戻る
     if (this.state === "difficulty") {
-      if (Input.consumeEsc()) { this.state = "title"; Audio_.uiMove(); return; }   // タイトルへ戻る
-      const step = Input.consumeH() || Input.consumeNav();
+      if (Input.consumeEsc()) { this.state = "title"; Audio_.uiMove(); Input.clearMenu(); return; }   // タイトルへ戻る
+      const a = Input.consumeH(), b = Input.consumeNav(); const step = a || b;
       if (step) { const old = this.aiLevel; this.aiLevel = Math.max(1, Math.min(5, this.aiLevel + step)); if (this.aiLevel !== old) Audio_.uiMove(); }
       const d = Input.consumeDigit();
       if (d >= 0 && d <= 4) { Audio_.uiConfirm(); this.startCpu(d + 1); return; }
@@ -2293,7 +2301,7 @@ class Game {
       if (Input.consumeEsc()) {
         if (!this.online && this.mode === "cpu") {
           // CPU戦はレベル選択画面へ戻る（ホームではなく）
-          Audio_.stopBGM(); this.state = "difficulty"; Input.consumeH(); Input.consumeNav();
+          Audio_.stopBGM(); this.state = "difficulty"; Input.clearMenu();
         } else { this.quitToTitle(); }   // オンライン/2P はホームへ（切断）
         return;
       }
@@ -2353,8 +2361,7 @@ class Game {
         // タイムアップ：HP多い方の勝ち
         this.timer = 0;
         const w = this.p1.hp === this.p2.hp ? -1 : (this.p1.hp > this.p2.hp ? 0 : 1);
-        if (w === -1) { this.wins[0]++; this.wins[1]++; }
-        else this.wins[w]++;
+        if (w >= 0) this.wins[w]++;   // 引き分けは勝ち星を入れない（次ラウンドへ持ち越し）
         this.state = "roundEnd";
         this.banner = w === -1 ? "DRAW" : "TIME UP";
         this.bannerT = 2.6;
@@ -2757,6 +2764,7 @@ const Net = (() => {
   const NEUTRAL = enc({ move: 0, attack: false });
 
   function host() {
+    if (typeof Peer === "undefined") { cb.onStatus({ text: "通信ライブラリの読み込みに失敗しました。再読み込みしてください", failed: true }); return; }
     cleanup();
     role = "host";
     const code = genCode();
@@ -2767,6 +2775,7 @@ const Net = (() => {
     return code;
   }
   function join(code) {
+    if (typeof Peer === "undefined") { cb.onStatus({ text: "通信ライブラリの読み込みに失敗しました。再読み込みしてください", failed: true }); return; }
     cleanup();
     role = "guest";
     code = (code || "").trim().toUpperCase();
@@ -2793,7 +2802,8 @@ const Net = (() => {
   }
   function onData(msg) {
     if (!msg) return;
-    if (msg.t === "start") { if (!started) _start(); }
+    if (msg.t === "bye") { cb.onClose("相手が退出しました"); reset(); }   // 相手の退出を反映
+    else if (msg.t === "start") { if (!started) _start(); }
     else if (msg.t === "in") { remoteIn.set(msg.f, msg.i); }
   }
   function send(o) { if (conn && conn.open) conn.send(o); }
@@ -2901,8 +2911,8 @@ function showStatusView() { hide(lobbyHome); show(lobbyStatus); }
 
 // タイトルの「オンライン対戦」から呼ばれる（関数宣言＝巻き上げで game から参照可）
 function openLobby() { game.online = true; show(lobbyEl); showHomeView();
-  Audio_.stopWaitBGM(); roomCodeEl.classList.add("hidden"); btnStart.classList.add("hidden"); statusText.textContent = ""; }
-function closeLobbyToTitle() { Audio_.stopWaitBGM(); Net.cleanup(); hide(lobbyEl); game.online = false; game.state = "title"; }
+  Audio_.stopWaitBGM(); Input.clearMenu(); roomCodeEl.classList.add("hidden"); btnStart.classList.add("hidden"); statusText.textContent = ""; }
+function closeLobbyToTitle() { Audio_.stopWaitBGM(); Net.cleanup(); hide(lobbyEl); game.online = false; game.state = "title"; Input.clearMenu(); }
 
 // 試合終了（オンライン）：もう一度/退出 オーバーレイ
 function onMatchEndOnline(isHost) {
