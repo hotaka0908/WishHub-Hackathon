@@ -2737,24 +2737,30 @@ class Game {
     this.drawHUD(ctx);
     this.drawBanner(ctx);
     if (this.state === "matchEnd" && !this.online) {
-      ctx.save(); ctx.textAlign = "center";
-      // 獲得ポイント＆通算戦績
+      // 獲得ポイント＆通算戦績（左上＝HP/ゲージの下に表示）
       if (this.lastResult) {
         const r = this.lastResult;
+        ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+        const lx = 44, ly = 112;
         ctx.font = "22px 'Russo One', system-ui";
-        ctx.shadowColor = "rgba(255,210,60,.85)"; ctx.shadowBlur = 12;
+        ctx.shadowColor = "rgba(255,210,60,.85)"; ctx.shadowBlur = 10;
         ctx.fillStyle = "#ffd23d";
-        ctx.fillText("+" + r.gained + " pt   RANK " + r.rank, W / 2, H / 2 + 34);
+        ctx.fillText("+" + r.gained + " pt", lx, ly);
         ctx.shadowBlur = 0;
-        ctx.font = "15px system-ui"; ctx.fillStyle = "#9fb4e0";
-        ctx.fillText("通算 " + r.matches + " 戦 " + r.wins + " 勝" + (r.streak >= 2 ? "   " + r.streak + " 連勝中" : ""), W / 2, H / 2 + 58);
+        ctx.font = "15px 'Russo One', system-ui"; ctx.fillStyle = "#bdf0ff";
+        ctx.fillText("RANK " + r.rank, lx, ly + 23);
+        ctx.font = "13px system-ui"; ctx.fillStyle = "#9fb4e0";
+        ctx.fillText("通算 " + r.matches + " 戦 " + r.wins + " 勝" + (r.streak >= 2 ? " ・ " + r.streak + " 連勝中" : ""), lx, ly + 44);
+        ctx.restore();
       }
+      // 中央の操作案内
+      ctx.save(); ctx.textAlign = "center";
       if (Math.sin(this.t * 4) > -0.3) {
         ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
-        ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 92);
+        ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 64);
       }
       ctx.font = "bold 16px system-ui"; ctx.fillStyle = "#9fb4e0";
-      ctx.fillText("Esc: 戻る", W / 2, H / 2 + 122);
+      ctx.fillText("Esc: 戻る", W / 2, H / 2 + 96);
       ctx.restore();
     }
     // 対戦中：Escでホームへ戻れる旨を控えめに表示
