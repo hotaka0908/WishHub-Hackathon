@@ -2104,34 +2104,40 @@ class Game {
     const a = this.ai;
     // ===== レベル(1〜5)で「防御」と「カウンター」の上手さをスケール =====
     const t = ((a.level || 3) - 1) / 4;          // 0(Lv1)〜1(Lv5)
-    const blockMelee = 0.05 + 0.62 * t;          // 接近攻撃への反応ガード
-    const blockProj  = 0.03 + 0.55 * t;          // 必殺技(飛び道具)へのガード
-    const counter    = 0.10 + 0.82 * t;          // 隙・ガード後のカウンター
-    const aggro      = 0.55 + 0.22 * t;          // 近距離での攻撃積極性
+    const blockMelee = 0.05 + 0.88 * t;          // 反応ガード（Lv5≒0.93）
+    const blockProj  = 0.04 + 0.82 * t;          // 必殺技ガード（Lv5≒0.86）
+    const counter    = 0.10 + 0.88 * t;          // カウンター（Lv5≒0.98）
+    const aggro      = 0.42 + 0.50 * t;          // 攻撃積極性（Lv5≒0.92）
+    const reactBase  = 0.46 - 0.36 * t;          // 判断間隔（Lv5≒0.10＝反応速い）
     a.timer -= dt;
     // ガード直後のカウンター窓を保持
     if (me.blockstun > 0) a.blockTimer = 0.4; else a.blockTimer = Math.max(0, a.blockTimer - dt);
     const dist = Math.abs(you.x - me.x);
     const toYou = Math.sign(you.x - me.x) || 1;
 
-    // 反応ガード（メレー）：レベルが高いほど的確に止める
-    if (you.state === "attack" && dist < 175 && me.canAct()) {
-      if (Math.random() < blockMelee) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.16; }
+    // 反応ガード（メレー）：高レベルは相手の攻撃を読んで先んじてガード（攻撃中でも切り替える）
+    const guardRange = 175 + 60 * t;
+    if (you.state === "attack" && dist < guardRange && !me.airborne && me.state !== "knockdown" && me.hitstun <= 0) {
+      if (Math.random() < blockMelee) {
+        if (me.state === "attack" && me.attack && me.attack.t < me.attack.move.hs) { me.attack = null; me.state = "idle"; } // 出かかりの攻撃をキャンセルしてガード
+        if (me.canAct()) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.16; }
+      }
     }
     // 必殺技(飛び道具)のガード
     for (const pr of this.projectiles) {
       if (pr.owner === me) continue;
-      if (Math.sign(pr.vx) === -toYou && Math.abs(pr.x - me.x) < 320) {
-        if (Math.random() < blockProj) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
+      if (Math.sign(pr.vx) === -toYou && Math.abs(pr.x - me.x) < 360) {
+        if (Math.random() < blockProj) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.22; }
       }
     }
-    // カウンター：相手の技後の隙／自分のガード直後／相手の硬直に差し込む
+    // カウンター／追い討ち：相手の技後の隙・ガード直後・相手の硬直に即差し込む
     const youWhiff = you.state === "attack" && you.attack && you.attack.t > you.attack.move.he;
     const opportunity = a.blockTimer > 0 || youWhiff || you.state === "hit";
-    if (opportunity && dist < 185 && me.canAct() && a.action !== "block") {
+    if (opportunity && dist < 190 && me.canAct() && a.action !== "block") {
       if (Math.random() < counter) {
-        me.request("normal", Math.floor(Math.random() * 5));
-        a.blockTimer = 0; a.action = "wait"; a.moveDir = 0; a.timer = 0.26 + Math.random() * 0.2;
+        me.request("normal");
+        a.blockTimer = 0; a.action = "wait"; a.moveDir = 0;
+        a.timer = (0.22 - 0.12 * t) + Math.random() * 0.18;   // 高レベルほど手数が速い（コンボ的に）
         me.walk(0, you);
         return;
       }
@@ -2139,16 +2145,16 @@ class Game {
 
     // 通常技だけで戦う（必殺技はゲージ満タンで自動発動＝プレイヤーと同条件）
     if (a.timer <= 0) {
-      a.timer = (0.34 - 0.16 * t) + Math.random() * 0.3;   // 高レベルほど判断が速い
+      a.timer = reactBase + Math.random() * (0.3 - 0.16 * t);   // 高レベルほど判断が速い
       if (dist > 320) { a.action = "approach"; a.moveDir = toYou; }
       else if (dist > 150) {
         const r = Math.random();
-        if (r < 0.6) { a.action = "approach"; a.moveDir = toYou; }
+        if (r < 0.5 + 0.4 * t) { a.action = "approach"; a.moveDir = toYou; }  // 高レベルは積極的に詰める
         else { a.action = "wait"; a.moveDir = (Math.random() < 0.5 ? -toYou : 0); }
       } else {
         const r = Math.random();
         if (r < aggro) a.action = "normal";
-        else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.22; }
+        else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
       }
     }
 
