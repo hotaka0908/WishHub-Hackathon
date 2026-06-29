@@ -2383,7 +2383,7 @@ class Game {
         return;
       }
       const a = Input.consumeNav(), b = Input.consumeH(); const nav = a || b;  // 両方クリアして取り出す
-      if (nav) { this.menuIndex = (this.menuIndex + nav + 3) % 3; Audio_.uiMove(); }
+      if (nav) { this.menuIndex = (this.menuIndex + nav + 2) % 2; Audio_.uiMove(); }
       const d = Input.consumeDigit();
       if (d >= 0 && d <= 2) { this.menuIndex = d; Audio_.uiConfirm(); this.confirmMenu(); return; }
       if (Input.consumeEnter()) { Audio_.uiConfirm(); this.confirmMenu(); }
@@ -2672,11 +2672,10 @@ class Game {
     ctx.fillStyle = "rgba(255,255,255,.3)"; ctx.fillText(T, 0, 0); ctx.restore();
     ctx.restore();
 
-    // モード選択メニュー
+    // モード選択メニュー（CPU / オンライン）
     const opts = [
       { t: "1  CPU と対戦", y: H * 0.48 },
       { t: "2  オンライン対戦", y: H * 0.57 },
-      { t: "3  世界ランキング", y: H * 0.66 },
     ];
     ctx.font = "30px 'Russo One', system-ui";
     for (let i = 0; i < opts.length; i++) {
@@ -2698,6 +2697,13 @@ class Game {
     ctx.fillText(sd.points + " pt", lx, 70);
     ctx.font = "13px system-ui"; ctx.fillStyle = "#8fa3cf";
     ctx.fillText(sd.matches + " 戦 " + sd.wins + " 勝" + (sd.bestStreak >= 2 ? " ・ 最高 " + sd.bestStreak + " 連勝" : ""), lx, 92);
+    // 世界ランキングボタン（左上）
+    const lbPulse = 0.7 + Math.sin(this.t * 2.8) * 0.3;
+    ctx.font = "15px 'Russo One', system-ui";
+    ctx.shadowColor = "rgba(180,130,255," + lbPulse + ")"; ctx.shadowBlur = 12;
+    ctx.fillStyle = "rgba(210,180,255," + (0.75 + lbPulse * 0.25) + ")";
+    ctx.fillText("🏆  世界ランキング", lx, 118);
+    ctx.shadowBlur = 0;
     ctx.restore();
     // 操作説明
     ctx.font = "14px system-ui"; ctx.fillStyle = "#7e87b5";
@@ -3106,6 +3112,14 @@ function renderLeaderboard(d) {
 }
 $("btnLbReload").onclick = loadLeaderboard;
 $("btnLbBack").onclick = closeLeaderboard;
+// 左上「世界ランキング」クリック判定
+canvas.addEventListener("click", (e) => {
+  if (!game || game.state !== "title") return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * (W / rect.width);
+  const cy = (e.clientY - rect.top) * (H / rect.height);
+  if (cx >= 20 && cx <= 320 && cy >= 100 && cy <= 132) { openLeaderboard(); }
+});
 btnStart.onclick = () => { Net.begin(); };      // ホスト：対戦開始
 btnRematch.onclick = () => { hide(rematchEl); Net.begin(); };   // ホスト：再戦
 $("btnExit").onclick = () => { hide(rematchEl); Net.leave(); game.endOnline(); };
