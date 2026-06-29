@@ -2616,19 +2616,19 @@ class Game {
       const label = (sel ? "▶  " : "    ") + opts[i].t;
       ctx.fillText(label, W / 2, opts[i].y);
     }
-    // 戦績＆ランク（右上にコンパクト表示）
+    // 戦績＆ランク（左上にコンパクト表示）
     const sd = Stats.data;
-    ctx.save(); ctx.textAlign = "right"; ctx.textBaseline = "alphabetic";
-    const rx = W - 34;
+    ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    const lx = 34;
     ctx.font = "22px 'Russo One', system-ui";
     ctx.shadowColor = "rgba(255,210,60,.7)"; ctx.shadowBlur = 10;
     ctx.fillStyle = "#ffd23d";
-    ctx.fillText("RANK " + Stats.rank(), rx, 46);
+    ctx.fillText("RANK " + Stats.rank(), lx, 46);
     ctx.shadowBlur = 0;
     ctx.font = "16px 'Russo One', system-ui"; ctx.fillStyle = "#bdf0ff";
-    ctx.fillText(sd.points + " pt", rx, 70);
+    ctx.fillText(sd.points + " pt", lx, 70);
     ctx.font = "13px system-ui"; ctx.fillStyle = "#8fa3cf";
-    ctx.fillText(sd.matches + " 戦 " + sd.wins + " 勝" + (sd.bestStreak >= 2 ? " ・ 最高 " + sd.bestStreak + " 連勝" : ""), rx, 92);
+    ctx.fillText(sd.matches + " 戦 " + sd.wins + " 勝" + (sd.bestStreak >= 2 ? " ・ 最高 " + sd.bestStreak + " 連勝" : ""), lx, 92);
     ctx.restore();
     // 操作説明
     ctx.font = "14px system-ui"; ctx.fillStyle = "#7e87b5";
