@@ -2191,6 +2191,8 @@ class Game {
   }
   // Escで共通の「戻る／ホームへ」。オンラインなら切断、各種BGM/オーバーレイも片付ける
   quitToTitle() {
+    // 残っている演出（揺れ/ヒットストップ/スロー/フラッシュ/ズーム）を確実に止める
+    this.shake = 0; this.hitstop = 0; this.slow = 0; this.flash = 0; this.cine = 0;
     if (this.online) { try { Net.leave(); } catch (e) {} this.endOnline(); }
     this.online = false; this.state = "title";
     Audio_.stopBGM(); Audio_.stopWaitBGM();
@@ -2368,6 +2370,11 @@ class Game {
     this.t += dt;
     Input.update();
 
+    // 画面の揺れは状態に関係なく毎フレーム減衰させる
+    // （title/difficulty/matchEnd は途中で return するため、ここで減衰しないと
+    //  対戦からホーム等へ戻ったとき揺れが残り続けてしまう）
+    if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * 60);
+
     // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで決定
     if (this.state === "title") {
       // ロビー表示中はメニュー操作を裏に通さない（Escでキャンセルのみ）
@@ -2498,7 +2505,6 @@ class Game {
     }
 
     this.fx.update(sdt);
-    if (this.shake > 0) this.shake -= dt * 60;
   }
 
   /* ---- HUD ---- */
