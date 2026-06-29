@@ -2711,9 +2711,6 @@ class Game {
     ctx.fillText("🏆  世界ランキング", lx, 118);
     ctx.shadowBlur = 0;
     ctx.restore();
-    // 操作説明
-    ctx.font = "14px system-ui"; ctx.fillStyle = "#7e87b5";
-    ctx.fillText("← → 移動 ・ A〜Z 連打で攻撃", W / 2, H * 0.81);
     ctx.restore();
   }
 
@@ -2770,9 +2767,12 @@ class Game {
     ctx.font = "20px system-ui"; ctx.fillStyle = "#cdd8f5";
     ctx.fillText(descs[this.aiLevel - 1], W / 2, by + bh + 56);
 
-    // 操作説明
+    // 対戦中の操作説明（このレベル選択画面で案内）
+    ctx.font = "16px system-ui"; ctx.fillStyle = "#9fb0e0";
+    ctx.fillText("← → 移動 ・ A〜Z 連打で攻撃", W / 2, H * 0.83);
+    // 画面操作
     ctx.font = "15px system-ui"; ctx.fillStyle = "#7e87b5";
-    ctx.fillText("← → で選択 ・ 1〜5 で直接 ・ Enter で開始 ・ Esc で戻る", W / 2, H * 0.86);
+    ctx.fillText("Enter で開始 ・ Esc で戻る", W / 2, H * 0.88);
     ctx.restore();
   }
 
