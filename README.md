@@ -5,7 +5,7 @@ PCのブラウザで動く、ストリートファイター風の1対1 格闘ゲ
 **外部ファイル・ビルド不要** — `index.html` をブラウザで開くだけ。
 グラフィックは Canvas 2D の関節アニメ、サウンドは Web Audio でリアルタイム合成（音声ファイル一切なし）。
 
-🎮 **今すぐ遊ぶ:** https://neon-fist.vercel.app/
+🎮 **今すぐ遊ぶ:** https://wish-hub-hackathon.vercel.app/
 
 ---
 

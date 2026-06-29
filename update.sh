@@ -24,5 +24,5 @@ git push origin main
 
 echo ""
 echo "✅ GitHub に push しました。Vercel が自動でデプロイします。"
-echo "   公開URL: https://neon-fist.vercel.app/"
-echo "   ダッシュボード: https://vercel.com/hotakas-projects/neon-fist"
+echo "   公開URL: https://wish-hub-hackathon.vercel.app/"
+echo "   ダッシュボード: https://vercel.com/hotakas-projects/wish-hub-hackathon"
