@@ -704,8 +704,10 @@ class Fighter {
   _start(kind, g) {
     let move;
     const ci = this.comboIndex % NORMALS.length;   // 押すたびにループする現在位置
+    // ゲージ満タン中に通常攻撃ボタンを押すと必殺技が出る
+    if (kind === "normal" && this.meter >= MAX_METER) kind = "ultimate";
     if (kind === "ultimate") {
-      this.meter = 0; move = ULTIMATE;        // 満タンで自動発動 → ゲージ0に戻る
+      this.meter = 0; move = ULTIMATE;        // 撃つとゲージ0に戻る
     } else if (kind === "special") move = SPECIALS[ci];
     else { move = NORMALS[ci]; this.comboIndex++; }   // 通常攻撃だけがループを進める
 
@@ -966,11 +968,6 @@ class Fighter {
     // 向き（行動可能時のみ相手の方へ）
     if (this.canAct()) {
       const d = opp.x - this.x; if (Math.abs(d) > 6) this.facing = d > 0 ? 1 : -1;
-    }
-
-    // ゲージ満タン → 必殺技を自動発動（プレイヤー・CPU共通）
-    if (this.meter >= MAX_METER && game.state === "fight" && this.canAct()) {
-      this.buffer = null; this._start("ultimate");
     }
 
     // 入力バッファ消化
@@ -2185,7 +2182,7 @@ class Game {
       }
     }
 
-    // 通常技だけで戦う（必殺技はゲージ満タンで自動発動＝プレイヤーと同条件）
+    // 通常技だけで戦う（ゲージ満タン中は通常攻撃ボタンが必殺技になる＝プレイヤーと同条件）
     if (a.timer <= 0) {
       a.timer = reactBase + Math.random() * (0.3 - 0.16 * t);   // 高レベルほど判断が速い
       if (dist > 320) { a.action = "approach"; a.moveDir = toYou; }
