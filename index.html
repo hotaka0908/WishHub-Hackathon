@@ -2415,7 +2415,11 @@ class Game {
         } else { this.quitToTitle(); }   // オンライン/2P はホームへ（切断）
         return;
       }
-      if (!this.online && Input.consumeEnter()) { this.startMatch(); return; }  // 同じCPUレベルでもう一度
+      if (!this.online && Input.consumeEnter()) {
+        // CPU戦：勝ったら次のレベルへ（最大Lv5）、負けたら同じレベルでもう一度
+        if (this.mode === "cpu" && this.wins[0] >= 2) this.aiLevel = Math.min(5, this.aiLevel + 1);
+        this.startMatch(); return;
+      }
       return;
     }
     // 対戦中（ready/fight/roundEnd）に Esc → 中断してホームへ
@@ -2852,7 +2856,14 @@ class Game {
       ctx.save(); ctx.textAlign = "center";
       if (Math.sin(this.t * 4) > -0.3) {
         ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
-        ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 64);
+        let enterLabel;
+        if (this.mode === "cpu") {
+          const won = this.wins[0] >= 2;
+          if (won && this.aiLevel < 5) enterLabel = "Enter: 次のレベルへ（Lv" + (this.aiLevel + 1) + "）";
+          else if (won) enterLabel = "Enter: もう一度（Lv5・最高）";   // 最高レベルは据え置き
+          else enterLabel = "Enter: もう一度（Lv" + this.aiLevel + "）";
+        } else { enterLabel = "Enter: もう一度（再戦）"; }
+        ctx.fillText(enterLabel, W / 2, H / 2 + 64);
       }
       ctx.font = "bold 16px system-ui"; ctx.fillStyle = "#9fb4e0";
       ctx.fillText("Esc: 戻る", W / 2, H / 2 + 96);
