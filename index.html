@@ -408,6 +408,9 @@ const Audio_ = (() => {
       setTimeout(() => { if (ac) { tone("sawtooth", 165, 70, 0.8, 0.16, M); thump(95, 40, 0.7, 0.4, M); } }, 680);
     },
     round() { ensure(); tone("square", 520, 520, 0.12, 0.2); setTimeout(() => tone("square", 780, 780, 0.18, 0.22), 130); },
+    // メニュー操作音：移動（コツッ）／決定（ピロッ）
+    uiMove() { ensure(); tone("square", 520, 640, 0.05, 0.13); noise(0.02, 0.06, 7000, 4000); },
+    uiConfirm() { ensure(); tone("square", 680, 680, 0.07, 0.2); setTimeout(() => { if (ac) tone("square", 1020, 1020, 0.14, 0.2); }, 60); noise(0.05, 0.12, 6500, 3000); },
     startBGM() {
       ensure(); if (bgmTimer) return;
       const root = 55; // A1
@@ -2238,20 +2241,20 @@ class Game {
 
     // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで決定
     if (this.state === "title") {
-      const nav = Input.consumeNav();
-      if (nav) this.menuIndex = (this.menuIndex + nav + 2) % 2;
+      const nav = Input.consumeNav() || Input.consumeH();
+      if (nav) { this.menuIndex = (this.menuIndex + nav + 2) % 2; Audio_.uiMove(); }
       const d = Input.consumeDigit();
-      if (d === 0 || d === 1) { this.menuIndex = d; this.confirmMenu(); return; }
-      if (Input.consumeEnter()) { this.confirmMenu(); }
+      if (d === 0 || d === 1) { this.menuIndex = d; Audio_.uiConfirm(); this.confirmMenu(); return; }
+      if (Input.consumeEnter()) { Audio_.uiConfirm(); this.confirmMenu(); }
       return;
     }
     // 難易度選択：←→（↑↓も可）でCPUレベル変更 / 1〜5で直接 / Enterで開始
     if (this.state === "difficulty") {
       const step = Input.consumeH() || Input.consumeNav();
-      if (step) this.aiLevel = Math.max(1, Math.min(5, this.aiLevel + step));
+      if (step) { const old = this.aiLevel; this.aiLevel = Math.max(1, Math.min(5, this.aiLevel + step)); if (this.aiLevel !== old) Audio_.uiMove(); }
       const d = Input.consumeDigit();
-      if (d >= 0 && d <= 4) { this.startCpu(d + 1); return; }
-      if (Input.consumeEnter()) { this.startCpu(this.aiLevel); return; }
+      if (d >= 0 && d <= 4) { Audio_.uiConfirm(); this.startCpu(d + 1); return; }
+      if (Input.consumeEnter()) { Audio_.uiConfirm(); this.startCpu(this.aiLevel); return; }
       return;
     }
     if (this.state === "matchEnd") {
