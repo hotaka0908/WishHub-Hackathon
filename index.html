@@ -2310,7 +2310,8 @@ class Game {
       this.projectiles = this.projectiles.filter(p => !p.dead);
       this.checkCombat();
 
-      if (this.timer <= 0) {
+      // タイムアップ判定は「まだfight中（KOで決着していない）」時のみ＝二重カウント防止
+      if (this.state === "fight" && this.timer <= 0) {
         // タイムアップ：HP多い方の勝ち
         this.timer = 0;
         const w = this.p1.hp === this.p2.hp ? -1 : (this.p1.hp > this.p2.hp ? 0 : 1);
