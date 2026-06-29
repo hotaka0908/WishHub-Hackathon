@@ -639,6 +639,8 @@ class Fighter {
     this.colors = opts.colors;
     // 体格・髪型などの差別化設定（骨格長は変えず見た目だけ変える＝挙動は不変）
     this.build = Object.assign({ limbW: 1, torsoW: 1, headR: 15, hair: "spike", beard: false }, opts.build || {});
+    this.dmgTakenMul = 1;        // 被ダメージ倍率（小さいほど打たれ強い＝防御力）
+    this.moveSpeed = 1;          // 移動速度倍率（大きいほど俊敏）
     this.startX = opts.x;
     this.comboIndex = 0;   // 攻撃ループ位置：被弾やラウンド交代では保持し、試合開始でのみ0に戻す
     this.reset(opts.facing);
@@ -688,7 +690,8 @@ class Fighter {
 
   takeHit(move, fromDir, game) {
     if (this.state === "ko" || this.state === "knockdown") return;  // ダウン中は追撃を受けない
-    let dmg = move.dmg; const isUlt = !!move.projectile;
+    let dmg = Math.max(1, Math.round(move.dmg * (this.dmgTakenMul || 1)));  // 防御力で被ダメ軽減
+    const isUlt = !!move.projectile;
     if (this.blocking) {
       // 必殺技もガード可能：通常より削りが大きく、大きく押し戻される（こらえる）
       const chip = isUlt ? Math.max(2, Math.round(dmg * 0.30)) : Math.max(1, Math.round(dmg * 0.18));
@@ -956,7 +959,7 @@ class Fighter {
       if (cmd !== 0) {
         // 相手の攻撃中、または飛び道具が来ている時に逆方向＝ガード
         if (cmd === -toOpp && (opp.state === "attack" || incomingProj)) { this.blocking = true; this.state = "block"; }
-        else { this.vx = cmd * 440; this.state = "walk"; this.walkPhase += 0.4; }
+        else { this.vx = cmd * 440 * (this.moveSpeed || 1); this.state = "walk"; this.walkPhase += 0.4; }
       }
     }
     this.cmdDir = 0;
@@ -2028,6 +2031,13 @@ class Game {
   startMatch() {
     this.wins = [0, 0]; this.round = 1;
     this.ai.level = this.aiLevel;                 // 選んだ難易度を反映
+    // 強さの主軸 = 打たれ強さ(防御) と 俊敏さ。Lv1=脆い/鈍い → Lv5=半減ダメ/俊敏
+    const lt = (this.aiLevel - 1) / 4;
+    this.p1.dmgTakenMul = 1; this.p1.moveSpeed = 1;
+    if (this.mode === "cpu") {
+      this.p2.dmgTakenMul = 1.2 - 0.7 * lt;       // Lv1 1.2(脆) → Lv3 0.85 → Lv5 0.5(半減)
+      this.p2.moveSpeed = 1 + 0.5 * lt;           // Lv5 ≒1.5倍の俊敏さ
+    } else { this.p2.dmgTakenMul = 1; this.p2.moveSpeed = 1; }
     Input.setMode(this.online ? "online" : this.mode);
     // モードに応じてP2をCPU/人間に、名前も切替
     this.p2.isCPU = (this.mode === "cpu");
@@ -2104,40 +2114,36 @@ class Game {
     const a = this.ai;
     // ===== レベル(1〜5)で「防御」と「カウンター」の上手さをスケール =====
     const t = ((a.level || 3) - 1) / 4;          // 0(Lv1)〜1(Lv5)
-    const blockMelee = 0.05 + 0.88 * t;          // 反応ガード（Lv5≒0.93）
-    const blockProj  = 0.04 + 0.82 * t;          // 必殺技ガード（Lv5≒0.86）
-    const counter    = 0.10 + 0.88 * t;          // カウンター（Lv5≒0.98）
-    const aggro      = 0.42 + 0.50 * t;          // 攻撃積極性（Lv5≒0.92）
-    const reactBase  = 0.46 - 0.36 * t;          // 判断間隔（Lv5≒0.10＝反応速い）
+    // 強さの主軸は「打たれ強さ(防御力)」。ガード/カウンターは控えめ＝守ってばかりにしない
+    const blockMelee = 0.12 + 0.12 * t;          // 反応ガード（Lv1≒0.12→Lv5≒0.24）
+    const blockProj  = 0.12 + 0.20 * t;          // 必殺技はそこそこ防ぐ
+    const counter    = 0.16 + 0.22 * t;          // たまにカウンター
+    const aggro      = 0.55 + 0.18 * t;          // 攻めは少し積極的に
+    const reactBase  = 0.40 - 0.18 * t;          // 判断間隔（高レベルほど少し速い）
     a.timer -= dt;
     // ガード直後のカウンター窓を保持
     if (me.blockstun > 0) a.blockTimer = 0.4; else a.blockTimer = Math.max(0, a.blockTimer - dt);
     const dist = Math.abs(you.x - me.x);
     const toYou = Math.sign(you.x - me.x) || 1;
 
-    // 反応ガード（メレー）：高レベルは相手の攻撃を読んで先んじてガード（攻撃中でも切り替える）
-    const guardRange = 175 + 60 * t;
-    if (you.state === "attack" && dist < guardRange && !me.airborne && me.state !== "knockdown" && me.hitstun <= 0) {
-      if (Math.random() < blockMelee) {
-        if (me.state === "attack" && me.attack && me.attack.t < me.attack.move.hs) { me.attack = null; me.state = "idle"; } // 出かかりの攻撃をキャンセルしてガード
-        if (me.canAct()) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.16; }
-      }
+    // 反応ガード（控えめ）
+    if (you.state === "attack" && dist < 175 && me.canAct()) {
+      if (Math.random() < blockMelee) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.16; }
     }
     // 必殺技(飛び道具)のガード
     for (const pr of this.projectiles) {
       if (pr.owner === me) continue;
-      if (Math.sign(pr.vx) === -toYou && Math.abs(pr.x - me.x) < 360) {
-        if (Math.random() < blockProj) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.22; }
+      if (Math.sign(pr.vx) === -toYou && Math.abs(pr.x - me.x) < 320) {
+        if (Math.random() < blockProj) { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
       }
     }
-    // カウンター／追い討ち：相手の技後の隙・ガード直後・相手の硬直に即差し込む
+    // カウンター（控えめ）：相手の技後の隙・ガード直後・相手の硬直に差し込む
     const youWhiff = you.state === "attack" && you.attack && you.attack.t > you.attack.move.he;
     const opportunity = a.blockTimer > 0 || youWhiff || you.state === "hit";
-    if (opportunity && dist < 190 && me.canAct() && a.action !== "block") {
+    if (opportunity && dist < 185 && me.canAct() && a.action !== "block") {
       if (Math.random() < counter) {
         me.request("normal");
-        a.blockTimer = 0; a.action = "wait"; a.moveDir = 0;
-        a.timer = (0.22 - 0.12 * t) + Math.random() * 0.18;   // 高レベルほど手数が速い（コンボ的に）
+        a.blockTimer = 0; a.action = "wait"; a.moveDir = 0; a.timer = 0.26 + Math.random() * 0.2;
         me.walk(0, you);
         return;
       }
@@ -2148,12 +2154,22 @@ class Game {
       a.timer = reactBase + Math.random() * (0.3 - 0.16 * t);   // 高レベルほど判断が速い
       if (dist > 320) { a.action = "approach"; a.moveDir = toYou; }
       else if (dist > 150) {
+        // 高レベルほど前後に素早くステップ（フットワークで揺さぶる）
+        const foot = 0.18 + 0.55 * t;
         const r = Math.random();
-        if (r < 0.5 + 0.4 * t) { a.action = "approach"; a.moveDir = toYou; }  // 高レベルは積極的に詰める
-        else { a.action = "wait"; a.moveDir = (Math.random() < 0.5 ? -toYou : 0); }
+        if (r < foot) {
+          a.action = "approach";
+          a.moveDir = (Math.random() < 0.62 ? toYou : -toYou);   // 主に前、たまに引いて誘う
+          a.timer = 0.09 + Math.random() * (0.16 - 0.07 * t);    // 短く＝キビキビ切り返す
+        } else if (r < foot + 0.32) {
+          a.action = "approach"; a.moveDir = toYou;
+        } else {
+          a.action = "wait"; a.moveDir = (Math.random() < 0.5 ? -toYou : 0);
+        }
       } else {
         const r = Math.random();
         if (r < aggro) a.action = "normal";
+        else if (r < aggro + 0.12 + 0.2 * t) { a.action = "approach"; a.moveDir = -toYou; a.timer = 0.10 + Math.random() * 0.12; } // バックステップで間合い調整
         else { a.action = "block"; a.moveDir = -toYou; a.timer = 0.2; }
       }
     }
