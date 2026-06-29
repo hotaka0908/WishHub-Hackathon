@@ -2690,7 +2690,7 @@ class Game {
         ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 64);
       }
       ctx.font = "bold 16px system-ui"; ctx.fillStyle = "#9fb4e0";
-      ctx.fillText(this.mode === "cpu" ? "Esc: レベル選択に戻る" : "Esc: ホームに戻る", W / 2, H / 2 + 96);
+      ctx.fillText("Esc: 戻る", W / 2, H / 2 + 96);
       ctx.restore();
     }
     // 対戦中：Escでホームへ戻れる旨を控えめに表示
