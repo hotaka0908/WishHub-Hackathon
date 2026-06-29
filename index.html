@@ -2425,6 +2425,7 @@ class Game {
           if (youWonMatch) Audio_.victory(); else Audio_.defeat();
           // 戦績＆ポイントを記録（ローカル2人対戦は1Pの勝敗で計上）
           this.lastResult = Stats.record(youWonMatch);
+          this.lastResultStart = this.t;   // ポイント弾みアニメの起点
         } else { this.round++; this.startRound(); }
       }
     }
@@ -2742,10 +2743,20 @@ class Game {
         const r = this.lastResult;
         ctx.save(); ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         const lx = 44, ly = 112;
+        // 「+◯ pt」を弾ませる：登場時にドンと大きく → 落ち着いてからポンポン跳ねる
+        const age = Math.max(0, this.t - (this.lastResultStart || 0));
+        const pop = age < 0.45 ? 1 + 0.9 * (1 - age / 0.45) : 1;       // 登場のオーバーシュート
+        const bounce = Math.pow(Math.abs(Math.sin(this.t * 4.5)), 0.7); // 継続的な弾み
+        const sc = pop * (1 + bounce * 0.14);
+        const hop = -bounce * 7;
+        ctx.save();
+        ctx.translate(lx, ly + hop); ctx.scale(sc, sc);
         ctx.font = "22px 'Russo One', system-ui";
-        ctx.shadowColor = "rgba(255,210,60,.85)"; ctx.shadowBlur = 10;
+        ctx.shadowColor = "rgba(255,210,60,.95)"; ctx.shadowBlur = 12;
         ctx.fillStyle = "#ffd23d";
-        ctx.fillText("+" + r.gained + " pt", lx, ly);
+        ctx.fillText("+" + r.gained + " pt", 0, 0);
+        ctx.restore();
+        // RANK / 通算（静止）
         ctx.shadowBlur = 0;
         ctx.font = "15px 'Russo One', system-ui"; ctx.fillStyle = "#bdf0ff";
         ctx.fillText("RANK " + r.rank, lx, ly + 23);
