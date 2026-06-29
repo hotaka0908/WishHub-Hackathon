@@ -136,7 +136,7 @@ window.addEventListener("resize", fit); fit();
    AUDIO ENGINE  — Web Audio 合成
    ===================================================================== */
 const Audio_ = (() => {
-  let ac = null, master = null, noiseBuf = null, bgmTimer = null, bgmStep = 0, musicGain = null, punchBus = null;
+  let ac = null, master = null, noiseBuf = null, bgmTimer = null, bgmStep = 0, musicGain = null, punchBus = null, waitTimer = null;
   function ensure() {
     if (ac) return;
     ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -448,7 +448,31 @@ const Audio_ = (() => {
       noise(0.3, 0.4, 5200, 500, punchBus);
       setTimeout(() => { if (ac) { tone("square", 660, 660, 0.16, 0.22, punchBus); tone("square", 990, 990, 0.22, 0.2, punchBus); } }, 70);
     },
-    stopBGM() { if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; } }
+    stopBGM() { if (bgmTimer) { clearInterval(bgmTimer); bgmTimer = null; } },
+    // 待機BGM（オンラインロビーで相手を待つ間）：落ち着いたループ
+    startWaitBGM() {
+      ensure(); if (waitTimer) return;
+      const root = 220; // A3
+      const arp = [0, 7, 12, 16, 19, 16, 12, 7];     // ゆったり上下する分散和音
+      const stepDur = 0.34;
+      let step = 0;
+      const play = () => {
+        if (!ac) return;
+        const i = step % arp.length;
+        const f = root * Math.pow(2, arp[i] / 12);
+        tone("triangle", f, f, stepDur * 1.3, 0.09, musicGain);          // やわらかいアルペジオ
+        if (step % 8 === 0) {                                            // 低音パッド
+          const pf = root / 2;
+          tone("sawtooth", pf, pf, stepDur * 8, 0.045, musicGain);
+          tone("sawtooth", pf * Math.pow(2, 7 / 12), pf * Math.pow(2, 7 / 12), stepDur * 8, 0.035, musicGain);
+        }
+        if (step % 2 === 1) noise(0.025, 0.04, 9000, 6000, musicGain);   // 控えめなハット
+        step++;
+      };
+      play();
+      waitTimer = setInterval(play, stepDur * 1000);
+    },
+    stopWaitBGM() { if (waitTimer) { clearInterval(waitTimer); waitTimer = null; } }
   };
   return api;
 })();
@@ -2833,9 +2857,13 @@ Net.init({
     if (s.code) { roomCodeEl.textContent = s.code; roomCodeEl.classList.remove("hidden"); }
     if (s.failed) roomCodeEl.classList.add("hidden");   // 失敗時は古いコードを隠す
     btnStart.classList.toggle("hidden", !s.canStart);
+    // ロビーで待っている間は待機BGM（失敗時のみ停止。開始時は onStart で停止）
+    if (s.failed) Audio_.stopWaitBGM();
+    else Audio_.startWaitBGM();
   },
-  onStart() { hide(lobbyEl); hide(rematchEl); game.startOnline(Net.getRole()); },
+  onStart() { Audio_.stopWaitBGM(); hide(lobbyEl); hide(rematchEl); game.startOnline(Net.getRole()); },
   onClose(msg) {
+    Audio_.stopWaitBGM();
     hide(rematchEl);
     if (game.online) game.endOnline();
     // タイトルへ戻し、理由を表示
@@ -2852,8 +2880,8 @@ function showStatusView() { hide(lobbyHome); show(lobbyStatus); }
 
 // タイトルの「オンライン対戦」から呼ばれる（関数宣言＝巻き上げで game から参照可）
 function openLobby() { game.online = true; show(lobbyEl); showHomeView();
-  roomCodeEl.classList.add("hidden"); btnStart.classList.add("hidden"); statusText.textContent = ""; }
-function closeLobbyToTitle() { Net.cleanup(); hide(lobbyEl); game.online = false; game.state = "title"; }
+  Audio_.stopWaitBGM(); roomCodeEl.classList.add("hidden"); btnStart.classList.add("hidden"); statusText.textContent = ""; }
+function closeLobbyToTitle() { Audio_.stopWaitBGM(); Net.cleanup(); hide(lobbyEl); game.online = false; game.state = "title"; }
 
 // 試合終了（オンライン）：もう一度/退出 オーバーレイ
 function onMatchEndOnline(isHost) {
