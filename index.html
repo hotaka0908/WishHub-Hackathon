@@ -1246,6 +1246,43 @@ class Fighter {
   }
 }
 
+/* =====================================================================
+   STATS — 戦績＆ポイント（localStorage で永続化）
+   ===================================================================== */
+const Stats = (() => {
+  const KEY = "vibefight-stats-v1";
+  const def = { matches: 0, wins: 0, losses: 0, points: 0, streak: 0, bestStreak: 0 };
+  function load() {
+    try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && typeof s.points === "number") return Object.assign({}, def, s); } catch (e) {}
+    return Object.assign({}, def);
+  }
+  let data = load();
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+  // 1試合の結果を記録。戻り値で獲得ポイント等を返す
+  function record(won) {
+    data.matches++;
+    let gained = 10;                          // 参加ポイント（戦えば必ず増える）
+    if (won) {
+      data.wins++; data.streak++;
+      if (data.streak > data.bestStreak) data.bestStreak = data.streak;
+      gained += 40 + data.streak * 5;         // 勝利＋連勝ボーナス
+    } else { data.losses++; data.streak = 0; }
+    data.points += gained;
+    save();
+    return { gained, points: data.points, matches: data.matches, wins: data.wins, streak: data.streak, rank: rank() };
+  }
+  function rank() {
+    const p = data.points;
+    if (p < 100) return "ROOKIE";
+    if (p < 300) return "FIGHTER";
+    if (p < 700) return "VETERAN";
+    if (p < 1500) return "MASTER";
+    return "LEGEND";
+  }
+  function reset() { data = Object.assign({}, def); save(); }
+  return { get data() { return data; }, record, rank, reset };
+})();
+
 // 攻撃の残像（光るスウッシュ）
 function drawTrail(ctx, pts) {
   ctx.save();
@@ -2386,6 +2423,8 @@ class Game {
           const youWonMatch = this.online ? ((this.netRole === "host") === (this.wins[0] >= 2))
             : (this.mode === "cpu" ? this.wins[0] >= 2 : true);
           if (youWonMatch) Audio_.victory(); else Audio_.defeat();
+          // 戦績＆ポイントを記録（ローカル2人対戦は1Pの勝敗で計上）
+          this.lastResult = Stats.record(youWonMatch);
         } else { this.round++; this.startRound(); }
       }
     }
@@ -2577,6 +2616,15 @@ class Game {
       const label = (sel ? "▶  " : "    ") + opts[i].t;
       ctx.fillText(label, W / 2, opts[i].y);
     }
+    // 戦績＆ランク（戦うほど貯まるポイント）
+    const sd = Stats.data;
+    ctx.font = "20px 'Russo One', system-ui";
+    ctx.shadowColor = "rgba(255,210,60,.7)"; ctx.shadowBlur = 10;
+    ctx.fillStyle = "#ffd23d";
+    ctx.fillText("RANK  " + Stats.rank() + "   " + sd.points + " pt", W / 2, H * 0.69);
+    ctx.shadowBlur = 0;
+    ctx.font = "15px system-ui"; ctx.fillStyle = "#9fb4e0";
+    ctx.fillText(sd.matches + " 戦 " + sd.wins + " 勝" + (sd.bestStreak >= 2 ? "   最高 " + sd.bestStreak + " 連勝" : ""), W / 2, H * 0.725);
     // 操作説明
     ctx.font = "14px system-ui"; ctx.fillStyle = "#7e87b5";
     ctx.fillText("← → 移動 ・ A〜Z 連打で攻撃", W / 2, H * 0.81);
@@ -2685,12 +2733,23 @@ class Game {
     this.drawBanner(ctx);
     if (this.state === "matchEnd" && !this.online) {
       ctx.save(); ctx.textAlign = "center";
+      // 獲得ポイント＆通算戦績
+      if (this.lastResult) {
+        const r = this.lastResult;
+        ctx.font = "22px 'Russo One', system-ui";
+        ctx.shadowColor = "rgba(255,210,60,.85)"; ctx.shadowBlur = 12;
+        ctx.fillStyle = "#ffd23d";
+        ctx.fillText("+" + r.gained + " pt   RANK " + r.rank, W / 2, H / 2 + 34);
+        ctx.shadowBlur = 0;
+        ctx.font = "15px system-ui"; ctx.fillStyle = "#9fb4e0";
+        ctx.fillText("通算 " + r.matches + " 戦 " + r.wins + " 勝" + (r.streak >= 2 ? "   " + r.streak + " 連勝中" : ""), W / 2, H / 2 + 58);
+      }
       if (Math.sin(this.t * 4) > -0.3) {
         ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
-        ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 64);
+        ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 92);
       }
       ctx.font = "bold 16px system-ui"; ctx.fillStyle = "#9fb4e0";
-      ctx.fillText("Esc: 戻る", W / 2, H / 2 + 96);
+      ctx.fillText("Esc: 戻る", W / 2, H / 2 + 122);
       ctx.restore();
     }
     // 対戦中：Escでホームへ戻れる旨を控えめに表示
