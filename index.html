@@ -458,7 +458,7 @@ const Audio_ = (() => {
 const Input = (() => {
   const keys = {};                 // 押下状態（e.code をキーに）
   const q1 = [], q2 = [];          // 各プレイヤーの攻撃イベント
-  let enterPressed = false;
+  let enterPressed = false, escPressed = false;
   let menuNav = 0, menuH = 0, digitPick = -1; // タイトルのメニュー操作（縦／横）
   let onlineAttack = false;        // オンライン：このフレームに攻撃入力があったか
   let mode = "cpu";
@@ -474,6 +474,7 @@ const Input = (() => {
     Audio_.resume();
     const code = e.code, key = e.key;
     if (key === "Enter") { enterPressed = true; e.preventDefault(); return; }
+    if (key === "Escape") { escPressed = true; e.preventDefault(); return; }
     // タイトル用：上下でメニュー移動、数字で直接選択
     if (code === "ArrowUp" || code === "ArrowDown") { menuNav = code === "ArrowUp" ? -1 : 1; e.preventDefault(); return; }
     // 横メニュー選択用（移動キーにもフォールスルーするので return しない）
@@ -517,6 +518,7 @@ const Input = (() => {
   function takeEvents1() { const q = q1.slice(); q1.length = 0; return q; }
   function takeEvents2() { const q = q2.slice(); q2.length = 0; return q; }
   function consumeEnter() { const v = enterPressed; enterPressed = false; return v; }
+  function consumeEsc() { const v = escPressed; escPressed = false; return v; }
   function consumeNav() { const v = menuNav; menuNav = 0; return v; }
   function consumeH() { const v = menuH; menuH = 0; return v; }
   function consumeDigit() { const v = digitPick; digitPick = -1; return v; }
@@ -528,7 +530,7 @@ const Input = (() => {
     return { move, attack };
   }
   return { update, setMode, moveDir1, moveDir2, takeEvents1, takeEvents2,
-           consumeEnter, consumeNav, consumeH, consumeDigit, anyKeyCharging, sampleLocal };
+           consumeEnter, consumeEsc, consumeNav, consumeH, consumeDigit, anyKeyCharging, sampleLocal };
 })();
 
 /* =====================================================================
@@ -2255,7 +2257,10 @@ class Game {
     if (this.state === "matchEnd") {
       this.bannerT -= dt;
       // オンラインは DOM の「もう一度/退出」で進める（Enterは無効）
-      if (!this.online && Input.consumeEnter()) { this.state = "title"; Audio_.stopBGM(); }
+      if (!this.online) {
+        if (Input.consumeEnter()) { this.startMatch(); return; }       // 同じCPUレベルでもう一度
+        if (Input.consumeEsc()) { this.state = "title"; Audio_.stopBGM(); return; }  // ホームへ
+      }
       return;
     }
 
@@ -2630,8 +2635,13 @@ class Game {
     this.drawHUD(ctx);
     this.drawBanner(ctx);
     if (this.state === "matchEnd" && !this.online) {
-      ctx.save(); ctx.textAlign = "center"; ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
-      if (Math.sin(this.t * 4) > -0.3) ctx.fillText("Press ENTER", W / 2, H / 2 + 70);
+      ctx.save(); ctx.textAlign = "center";
+      if (Math.sin(this.t * 4) > -0.3) {
+        ctx.font = "bold 24px system-ui"; ctx.fillStyle = "#fff";
+        ctx.fillText("Enter: もう一度（" + (this.mode === "cpu" ? "Lv" + this.aiLevel : "再戦") + "）", W / 2, H / 2 + 64);
+      }
+      ctx.font = "bold 16px system-ui"; ctx.fillStyle = "#9fb4e0";
+      ctx.fillText("Esc: ホームに戻る", W / 2, H / 2 + 96);
       ctx.restore();
     }
     ctx.restore();
