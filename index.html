@@ -74,6 +74,20 @@
   #roomCode.hidden, #btnStart.hidden, #lobbyHome.hidden, #lobbyStatus.hidden,
   #btnRematch.hidden { display:none; }
   .hint-sm { font-size:12px; color:#7e87b5; margin-top:12px; letter-spacing:1px; }
+  /* 世界ランキング */
+  .lb-panel { width:min(520px,92vw); }
+  #lbBody { margin:8px 0 4px; max-height:48vh; overflow-y:auto; }
+  .lb-msg { color:#8fa3cf; padding:26px 0; font-size:15px; }
+  .lb-row { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; }
+  .lb-row + .lb-row { margin-top:3px; }
+  .lb-rank { width:46px; text-align:center; font-family:'Black Ops One', monospace; color:#8fb6ff; font-size:18px; }
+  .lb-row.top1 .lb-rank { color:#ffd23d; text-shadow:0 0 10px rgba(255,210,60,.6); }
+  .lb-row.top2 .lb-rank { color:#cfe0ff; }
+  .lb-row.top3 .lb-rank { color:#ffb27a; }
+  .lb-name { flex:1; text-align:left; color:#e6eeff; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lb-pts { font-family:'Black Ops One', monospace; color:#bdf0ff; font-size:16px; }
+  .lb-row.me { background:linear-gradient(90deg, rgba(74,166,255,.2), rgba(255,79,200,.12)); box-shadow:inset 0 0 0 1px rgba(120,180,255,.45); }
+  .lb-me { margin-top:8px; color:#9fb4e0; font-size:14px; min-height:18px; }
 </style>
 </head>
 <body>
@@ -107,6 +121,19 @@
     <h2 id="rematchText" class="solo">試合終了</h2>
     <button id="btnRematch" class="hidden">もう一度たたかう</button>
     <button id="btnExit" class="ghost">退出する</button>
+  </div>
+</div>
+
+<!-- 世界ランキング -->
+<div id="leaderboard" class="overlay hidden">
+  <div class="panel lb-panel">
+    <h2><span class="en">WORLD RANKING</span><span class="jp">世界ランキング</span></h2>
+    <div id="lbBody"><div class="lb-msg">読み込み中…</div></div>
+    <div id="lbMe" class="lb-me"></div>
+    <div class="row">
+      <button id="btnLbReload">更新</button>
+      <button id="btnLbBack" class="ghost">戻る</button>
+    </div>
   </div>
 </div>
 
@@ -1283,6 +1310,38 @@ const Stats = (() => {
   return { get data() { return data; }, record, rank, reset };
 })();
 
+/* =====================================================================
+   PROFILE — プレイヤーID＆ランダム表示名（世界ランキング用・localStorage）
+   ===================================================================== */
+const Profile = (() => {
+  const KEY = "vibefight-profile-v1";
+  const A = ["Neon", "Cyber", "Shadow", "Iron", "Blaze", "Storm", "Ghost", "Viper", "Turbo", "Hyper", "Crimson", "Azure", "Onyx", "Vortex"];
+  const B = ["Fist", "Striker", "Ronin", "Blade", "Fang", "Bolt", "Crusher", "Phantom", "Wolf", "Dragon", "Hawk", "Tiger", "Reaper", "Saber"];
+  const pick = a => a[Math.floor(Math.random() * a.length)];
+  const rndName = () => pick(A) + pick(B) + (Math.floor(Math.random() * 90) + 10);
+  const rndId = () => { let s = ""; for (let i = 0; i < 12; i++) s += "0123456789abcdef"[Math.floor(Math.random() * 16)]; return s; };
+  let data = null;
+  try { data = JSON.parse(localStorage.getItem(KEY)); } catch (e) {}
+  if (!data || !data.id) { data = { id: rndId(), name: rndName() }; try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+  return {
+    get id() { return data.id; },
+    get name() { return data.name; },
+    rename(n) { data.name = String(n || "").replace(/[ -]/g, "").slice(0, 16) || "Fighter"; save(); },
+  };
+})();
+
+// 自分の合計ポイントを世界ランキングに送信（失敗しても無視）
+function submitScore() {
+  try {
+    fetch("/api/leaderboard", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: Profile.id, name: Profile.name, points: Stats.data.points }),
+    }).catch(() => {});
+  } catch (e) {}
+}
+
 // 攻撃の残像（光るスウッシュ）
 function drawTrail(ctx, pts) {
   ctx.save();
@@ -2150,7 +2209,8 @@ class Game {
   // タイトルメニューの決定
   confirmMenu() {
     if (this.menuIndex === 0) { this.mode = "cpu"; this.online = false; this.state = "difficulty"; Input.consumeH(); Input.consumeNav(); } // 難易度選択へ（入力クリア）
-    else { this.online = true; openLobby(); }   // オンライン：ロビーを開く
+    else if (this.menuIndex === 1) { this.online = true; openLobby(); }   // オンライン：ロビーを開く
+    else { openLeaderboard(); }   // 世界ランキング
   }
   // 難易度（CPUレベル）を決めて開始
   startCpu(level) {
@@ -2316,10 +2376,16 @@ class Game {
         if (esc) closeLobbyToTitle();
         return;
       }
+      // ランキング表示中も同様（Escで戻る）
+      if (typeof lbEl !== "undefined" && !lbEl.classList.contains("hidden")) {
+        const esc = Input.consumeEsc(); Input.clearMenu();
+        if (esc) closeLeaderboard();
+        return;
+      }
       const a = Input.consumeNav(), b = Input.consumeH(); const nav = a || b;  // 両方クリアして取り出す
-      if (nav) { this.menuIndex = (this.menuIndex + nav + 2) % 2; Audio_.uiMove(); }
+      if (nav) { this.menuIndex = (this.menuIndex + nav + 3) % 3; Audio_.uiMove(); }
       const d = Input.consumeDigit();
-      if (d === 0 || d === 1) { this.menuIndex = d; Audio_.uiConfirm(); this.confirmMenu(); return; }
+      if (d >= 0 && d <= 2) { this.menuIndex = d; Audio_.uiConfirm(); this.confirmMenu(); return; }
       if (Input.consumeEnter()) { Audio_.uiConfirm(); this.confirmMenu(); }
       return;
     }
@@ -2426,6 +2492,7 @@ class Game {
           // 戦績＆ポイントを記録（ローカル2人対戦は1Pの勝敗で計上）
           this.lastResult = Stats.record(youWonMatch);
           this.lastResultStart = this.t;   // ポイント弾みアニメの起点
+          submitScore();                   // 世界ランキングへ合計ポイントを送信
         } else { this.round++; this.startRound(); }
       }
     }
@@ -2607,8 +2674,9 @@ class Game {
 
     // モード選択メニュー
     const opts = [
-      { t: "1  CPU と対戦", y: H * 0.50 },
-      { t: "2  オンライン対戦", y: H * 0.59 },
+      { t: "1  CPU と対戦", y: H * 0.48 },
+      { t: "2  オンライン対戦", y: H * 0.57 },
+      { t: "3  世界ランキング", y: H * 0.66 },
     ];
     ctx.font = "30px 'Russo One', system-ui";
     for (let i = 0; i < opts.length; i++) {
@@ -2965,6 +3033,7 @@ const $ = (id) => document.getElementById(id);
 const lobbyEl = $("lobby"), lobbyHome = $("lobbyHome"), lobbyStatus = $("lobbyStatus");
 const statusText = $("statusText"), roomCodeEl = $("roomCode"), btnStart = $("btnStart");
 const rematchEl = $("rematch"), btnRematch = $("btnRematch"), rematchText = $("rematchText");
+const lbEl = $("leaderboard"), lbBody = $("lbBody"), lbMe = $("lbMe");
 
 Net.init({
   onStatus(s) {
@@ -3011,6 +3080,32 @@ $("btnJoin").onclick = () => { Net.join($("codeInput").value); };
 $("codeInput").addEventListener("keydown", (e) => { if (e.key === "Enter") Net.join($("codeInput").value); });
 $("btnBack").onclick = closeLobbyToTitle;
 $("btnCancel").onclick = closeLobbyToTitle;
+
+// ===== 世界ランキング =====
+function openLeaderboard() { show(lbEl); Input.clearMenu(); loadLeaderboard(); }
+function closeLeaderboard() { hide(lbEl); game.state = "title"; Input.clearMenu(); }
+function lbEsc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function loadLeaderboard() {
+  lbBody.innerHTML = '<div class="lb-msg">読み込み中…</div>'; lbMe.textContent = "";
+  fetch("/api/leaderboard?id=" + encodeURIComponent(Profile.id), { cache: "no-store" })
+    .then(r => r.json()).then(renderLeaderboard)
+    .catch(() => { lbBody.innerHTML = '<div class="lb-msg">取得できませんでした。少し待って「更新」を押してください。</div>'; });
+}
+function renderLeaderboard(d) {
+  if (d && d.error === "leaderboard-unconfigured") { lbBody.innerHTML = '<div class="lb-msg">ランキングは準備中です（サーバ設定待ち）。</div>'; return; }
+  const list = (d && d.list) || [];
+  if (!list.length) lbBody.innerHTML = '<div class="lb-msg">まだ記録がありません。1番乗りになろう！</div>';
+  else lbBody.innerHTML = list.map(e => {
+    const top = e.rank <= 3 ? " top" + e.rank : "";
+    const me = e.id === Profile.id ? " me" : "";
+    return '<div class="lb-row' + top + me + '"><div class="lb-rank">' + e.rank + '</div><div class="lb-name">'
+      + lbEsc(e.name) + '</div><div class="lb-pts">' + e.points + ' pt</div></div>';
+  }).join("");
+  if (d && d.me) lbMe.textContent = "あなた（" + Profile.name + "）: " + d.me.rank + " 位 / " + d.total + " 人中 ・ " + d.me.points + " pt";
+  else lbMe.textContent = "あなた: " + Profile.name + "（プレイして記録を残そう）";
+}
+$("btnLbReload").onclick = loadLeaderboard;
+$("btnLbBack").onclick = closeLeaderboard;
 btnStart.onclick = () => { Net.begin(); };      // ホスト：対戦開始
 btnRematch.onclick = () => { hide(rematchEl); Net.begin(); };   // ホスト：再戦
 $("btnExit").onclick = () => { hide(rematchEl); Net.leave(); game.endOnline(); };
