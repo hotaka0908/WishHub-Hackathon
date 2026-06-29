@@ -2750,12 +2750,15 @@ class Game {
         const bounce = Math.pow(Math.abs(Math.sin(this.t * 4.5)), 0.7) * decay;
         const sc = pop * (1 + bounce * 0.14);
         const hop = -bounce * 7;
+        // 0 から獲得値までカウントアップ（約0.7秒・イーズアウト）
+        const cu = Math.min(1, age / 0.7);
+        const shown = Math.round(r.gained * (1 - Math.pow(1 - cu, 3)));
         ctx.save();
         ctx.translate(lx, ly + hop); ctx.scale(sc, sc);
         ctx.font = "22px 'Russo One', system-ui";
         ctx.shadowColor = "rgba(255,210,60,.95)"; ctx.shadowBlur = 12;
         ctx.fillStyle = "#ffd23d";
-        ctx.fillText("+" + r.gained + " pt", 0, 0);
+        ctx.fillText("+" + shown + " pt", 0, 0);
         ctx.restore();
         // RANK / 通算（静止）
         ctx.shadowBlur = 0;
