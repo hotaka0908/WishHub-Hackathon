@@ -2093,6 +2093,13 @@ class Game {
     this.state = "title"; this.menuIndex = 1;
     Audio_.stopBGM();
   }
+  // Escで共通の「戻る／ホームへ」。オンラインなら切断、各種BGM/オーバーレイも片付ける
+  quitToTitle() {
+    if (this.online) { try { Net.leave(); } catch (e) {} this.endOnline(); }
+    this.online = false; this.state = "title";
+    Audio_.stopBGM(); Audio_.stopWaitBGM();
+    if (typeof hide === "function") { hide(rematchEl); hide(lobbyEl); }
+  }
   // Net が各フレーム適用する入力（P1=host側 / P2=guest側）
   setOnlineInputs(in1, in2) { this._oi1 = in1; this._oi2 = in2; }
   // 明示入力を両ファイターへ反映（オンライン用）
@@ -2265,6 +2272,8 @@ class Game {
 
     // タイトル：↑↓でモード選択 / 1・2で直接選択 / Enterで決定
     if (this.state === "title") {
+      // ロビー表示中に Esc → ロビーを閉じる（キャンセル）
+      if (Input.consumeEsc() && typeof lobbyEl !== "undefined" && !lobbyEl.classList.contains("hidden")) { closeLobbyToTitle(); return; }
       const nav = Input.consumeNav() || Input.consumeH();
       if (nav) { this.menuIndex = (this.menuIndex + nav + 2) % 2; Audio_.uiMove(); }
       const d = Input.consumeDigit();
@@ -2272,8 +2281,9 @@ class Game {
       if (Input.consumeEnter()) { Audio_.uiConfirm(); this.confirmMenu(); }
       return;
     }
-    // 難易度選択：←→（↑↓も可）でCPUレベル変更 / 1〜5で直接 / Enterで開始
+    // 難易度選択：←→（↑↓も可）でCPUレベル変更 / 1〜5で直接 / Enterで開始 / Escで戻る
     if (this.state === "difficulty") {
+      if (Input.consumeEsc()) { this.state = "title"; Audio_.uiMove(); return; }   // タイトルへ戻る
       const step = Input.consumeH() || Input.consumeNav();
       if (step) { const old = this.aiLevel; this.aiLevel = Math.max(1, Math.min(5, this.aiLevel + step)); if (this.aiLevel !== old) Audio_.uiMove(); }
       const d = Input.consumeDigit();
@@ -2283,12 +2293,13 @@ class Game {
     }
     if (this.state === "matchEnd") {
       this.bannerT -= dt;
-      // オンラインは DOM の「もう一度/退出」で進める（Enterは無効）
-      if (!this.online) {
-        if (Input.consumeEnter()) { this.startMatch(); return; }       // 同じCPUレベルでもう一度
-        if (Input.consumeEsc()) { this.state = "title"; Audio_.stopBGM(); return; }  // ホームへ
-      }
+      if (Input.consumeEsc()) { this.quitToTitle(); return; }            // どちらのモードでもホームへ
+      if (!this.online && Input.consumeEnter()) { this.startMatch(); return; }  // 同じCPUレベルでもう一度
       return;
+    }
+    // 対戦中（ready/fight/roundEnd）に Esc → 中断してホームへ
+    if ((this.state === "ready" || this.state === "fight" || this.state === "roundEnd") && Input.consumeEsc()) {
+      this.quitToTitle(); return;
     }
 
     // シネマズームの減衰（演出中も進める）
@@ -2617,7 +2628,7 @@ class Game {
 
     // 操作説明
     ctx.font = "15px system-ui"; ctx.fillStyle = "#7e87b5";
-    ctx.fillText("← → で選択 ・ 1〜5 で直接 ・ Enter で開始", W / 2, H * 0.86);
+    ctx.fillText("← → で選択 ・ 1〜5 で直接 ・ Enter で開始 ・ Esc で戻る", W / 2, H * 0.86);
     ctx.restore();
   }
 
@@ -2670,6 +2681,13 @@ class Game {
       }
       ctx.font = "bold 16px system-ui"; ctx.fillStyle = "#9fb4e0";
       ctx.fillText("Esc: ホームに戻る", W / 2, H / 2 + 96);
+      ctx.restore();
+    }
+    // 対戦中：Escでホームへ戻れる旨を控えめに表示
+    if (this.state === "ready" || this.state === "fight" || this.state === "roundEnd") {
+      ctx.save(); ctx.textAlign = "right"; ctx.font = "12px system-ui";
+      ctx.fillStyle = "rgba(180,195,230,.45)";
+      ctx.fillText("Esc: ホーム", W - 16, H - 12);
       ctx.restore();
     }
     ctx.restore();
