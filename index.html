@@ -438,6 +438,8 @@ const Audio_ = (() => {
     // メニュー操作音：移動（コツッ）／決定（ピロッ）
     uiMove() { ensure(); tone("square", 520, 640, 0.05, 0.13); noise(0.02, 0.06, 7000, 4000); },
     uiConfirm() { ensure(); tone("square", 680, 680, 0.07, 0.2); setTimeout(() => { if (ac) tone("square", 1020, 1020, 0.14, 0.2); }, 60); noise(0.05, 0.12, 6500, 3000); },
+    // ピンチの鼓動（ドクン…ドクン…）
+    heartbeat() { ensure(); thump(88, 42, 0.16, 0.3); setTimeout(() => { if (ac) thump(74, 38, 0.13, 0.2); }, 150); },
     startBGM() {
       ensure(); if (bgmTimer) return;
       const root = 55; // A1
@@ -610,6 +612,23 @@ const SPECIALS = [
 ];
 const ULTIMATE = { name: "波動・烈", pose: "push", dur: .52, hs: .18, he: .28, projectile: true, dmg: 45, cost: 50 };
 const MAX_METER = 100;
+const PINCH_HP = 25;   // 残りHPがこれ以下で「ピンチ」＝警告演出＋ゲージ増加1.5倍（逆転のチャンス）
+
+/* =====================================================================
+   RIVALS — CPU戦のレベルごとの対戦相手（名前と見た目が変わる）
+   ===================================================================== */
+const RIVALS = [
+  { name: "コルト",   build: { limbW: 0.92, torsoW: 0.94, headR: 14, hair: "spike" },
+    colors: { skin: "#f0b58a", cloth: "#57d06a", cloth2: "#2f9e4a", shoe: "#1c3a24", hair: "#6b4a2e", band: "#f2f2f2", belt: "#1e4d2a" } },
+  { name: "ヴォルト", build: { limbW: 1.02, torsoW: 1.0, headR: 15, hair: "spike" },
+    colors: { skin: "#e8b184", cloth: "#ffc93d", cloth2: "#e09a20", shoe: "#3a2c10", hair: "#2b2b2b", band: "#2b6fd6", belt: "#6b4a10" } },
+  { name: "ブルーノ", build: { limbW: 1.24, torsoW: 1.2, headR: 16, hair: "mohawk", beard: true },
+    colors: { skin: "#e7a878", cloth: "#ff5a5a", cloth2: "#c23030", shoe: "#2a1414", hair: "#1c1c1c", band: "#ffd23d", belt: "#3a0d0d" } },
+  { name: "レイヴン", build: { limbW: 0.9, torsoW: 0.95, headR: 14, hair: "spike" },
+    colors: { skin: "#d99a6c", cloth: "#9a5bff", cloth2: "#6a35c8", shoe: "#201233", hair: "#12101c", band: "#ff4fc8", belt: "#2a1650" } },
+  { name: "オーガ",   build: { limbW: 1.32, torsoW: 1.28, headR: 16, hair: "mohawk", beard: true },
+    colors: { skin: "#d8a37e", cloth: "#2a2d3a", cloth2: "#181a24", shoe: "#0c0c12", hair: "#c22030", band: "#ff3535", belt: "#7a1020" } },
+];
 
 /* =====================================================================
    POSE — 関節アニメ用のポーズ定義（角度: 0=真下, +で前方向）
@@ -748,6 +767,12 @@ class Fighter {
     else Audio_.whiff(move.dmg > 9 ? 1 : 0, move.pose);
   }
 
+  // ゲージ増加：ピンチ（残りHPわずか）だと1.5倍たまる＝逆転のチャンス
+  gainMeter(n) {
+    const mul = this.hp > 0 && this.hp <= PINCH_HP ? 1.5 : 1;
+    this.meter = Math.min(MAX_METER, this.meter + n * mul);
+  }
+
   takeHit(move, fromDir, game) {
     if (this.state === "ko" || this.state === "knockdown") return;  // ダウン中は追撃を受けない
     let dmg = Math.max(1, Math.round(move.dmg * (this.dmgTakenMul || 1)));  // 防御力で被ダメ軽減
@@ -758,7 +783,7 @@ class Fighter {
       this.hp -= chip;
       this.blockstun = isUlt ? 0.5 : 0.22;
       this.vx += fromDir * (isUlt ? 380 : 120);
-      this.meter = Math.min(MAX_METER, this.meter + (isUlt ? 10 : 4));
+      this.gainMeter(isUlt ? 10 : 4);
       this.hitCombo = 0;
       Audio_.block();
       game.fx.spark(this.x, this.y - 110, fromDir, "#bcd6ff", isUlt ? 22 : 8);
@@ -785,7 +810,7 @@ class Fighter {
     this.hp -= dmg;
     this.attack = null;
     this.flash = 0.2;
-    this.meter = Math.min(MAX_METER, this.meter + Math.round(dmg * 0.6));
+    this.gainMeter(Math.round(dmg * 0.6));
     const hx = this.x + fromDir * 24, hy = this.y - 112 + this.airY;
     Audio_.hit(dmg > 12 ? 1 : 0, move.pose, this.hitCombo);
 
@@ -1285,18 +1310,25 @@ const Stats = (() => {
   }
   let data = load();
   function save() { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
-  // 1試合の結果を記録。戻り値で獲得ポイント等を返す
-  function record(won) {
+  // 1試合の結果を記録。戻り値で獲得ポイントと内訳を返す
+  // opts: { level: CPUレベル(1〜5・オンライン等は0), perfect: 無傷で取ったラウンド数 }
+  function record(won, opts) {
+    opts = opts || {};
     data.matches++;
     let gained = 10;                          // 参加ポイント（戦えば必ず増える）
+    const parts = ["参加 +10"];
     if (won) {
       data.wins++; data.streak++;
       if (data.streak > data.bestStreak) data.bestStreak = data.streak;
-      gained += 40 + data.streak * 5;         // 勝利＋連勝ボーナス
+      const base = opts.level ? 20 + opts.level * 8 : 40;   // 強い相手を倒すほど高得点
+      gained += base;
+      parts.push((opts.level ? "Lv" + opts.level + " 撃破" : "勝利") + " +" + base);
+      if (data.streak >= 2) { const sb = data.streak * 5; gained += sb; parts.push(data.streak + "連勝 +" + sb); }
+      if (opts.perfect) { const pb = opts.perfect * 30; gained += pb; parts.push("PERFECT +" + pb); }
     } else { data.losses++; data.streak = 0; }
     data.points += gained;
     save();
-    return { gained, points: data.points, matches: data.matches, wins: data.wins, streak: data.streak, rank: rank() };
+    return { gained, breakdown: parts.join(" ・ "), points: data.points, matches: data.matches, wins: data.wins, streak: data.streak, rank: rank() };
   }
   function rank() {
     const p = data.points;
@@ -1780,9 +1812,9 @@ class Effects {
   dmgNum(x, y, value, big) {
     this.texts.push({ x: x + (Math.random() - 0.5) * 16, y, vy: -150, value: Math.round(value), life: 0.85, max: 0.85, big });
   }
-  // 画面中央のコール（FIRST ATTACK! / COUNTER! など）
-  callout(text, color) {
-    this.banners.push({ text, color: color || "#fff", x: W / 2, y: H * 0.30, vy: 0, life: 0.9, max: 0.9, size: 56, center: true });
+  // 画面中央のコール（FIRST ATTACK! / COUNTER! など。yで表示高さを指定可）
+  callout(text, color, y) {
+    this.banners.push({ text, color: color || "#fff", x: W / 2, y: y || H * 0.30, vy: 0, life: 0.9, max: 0.9, size: 56, center: true });
   }
   // コンボ数の表示（キャラ頭上）
   combo(n, color, x, y) {
@@ -2145,6 +2177,7 @@ class Game {
     this.t = 0;
     this.koTarget = null;
     this.firstHit = false;
+    this.perfectRounds = 0;      // 無傷で取ったラウンド数（試合終了時にボーナス加点）
   }
   // 手応えのコール / コンボ表示
   showCallout(text, color) { this.fx.callout(text, color); }
@@ -2164,16 +2197,21 @@ class Game {
       this.p2.moveSpeed = 1 + 0.5 * lt;           // Lv5 ≒1.5倍の俊敏さ
     } else { this.p2.dmgTakenMul = 1; this.p2.moveSpeed = 1; }
     Input.setMode(this.online ? "online" : this.mode);
-    // モードに応じてP2をCPU/人間に、名前も切替
+    // モードに応じてP2をCPU/人間に、名前・見た目も切替
     this.p2.isCPU = (this.mode === "cpu");
+    // CPU戦はレベルごとに個性の違うライバルが登場（対人戦は定番の赤ファイター）
+    const rv = this.mode === "cpu" ? RIVALS[this.aiLevel - 1] : RIVALS[2];
+    this.p2.build = Object.assign({ limbW: 1, torsoW: 1, headR: 15, hair: "spike", beard: false }, rv.build);
+    this.p2.colors = rv.colors;
     if (this.online) {
       // ホスト=1P(左)/ゲスト=2P(右)。各画面で自分側に「あなた」
       this.p1.name = this.netRole === "host" ? "あなた" : "あいて";
       this.p2.name = this.netRole === "guest" ? "あなた" : "あいて";
     } else {
       this.p1.name = (this.mode === "cpu") ? "あなた" : "1P";
-      this.p2.name = (this.mode === "cpu") ? ("CPU Lv" + this.aiLevel) : "2P";
+      this.p2.name = (this.mode === "cpu") ? (rv.name + " Lv" + this.aiLevel) : "2P";
     }
+    this.perfectRounds = 0;
     this.p1.comboIndex = 0; this.p2.comboIndex = 0;  // 新しい試合のみ攻撃ループを最初から
     Audio_.startBGM();
     this.startRound();
@@ -2225,7 +2263,9 @@ class Game {
     this.projectiles.length = 0; this.fx.parts.length = 0; this.fx.rings.length = 0;
     this.fx.banners.length = 0; this.fx.texts.length = 0; this.firstHit = false;
     this.timer = 60; this.koTarget = null;
-    this.state = "ready"; this.banner = "ROUND " + this.round; this.bannerT = 1.4;
+    // 1-1 で迎える最終ラウンドは「FINAL ROUND」で盛り上げる
+    const isFinal = this.wins[0] === 1 && this.wins[1] === 1;
+    this.state = "ready"; this.banner = isFinal ? "FINAL ROUND" : "ROUND " + this.round; this.bannerT = 1.4;
     Audio_.round();
   }
   spawnProjectile(owner) { this.projectiles.push(new Projectile(owner, this)); Audio_.fire(); }
@@ -2233,11 +2273,19 @@ class Game {
   setSlow(dur, factor) { if (dur > this.slow) this.slow = dur; this.slowFactor = Math.min(this.slowFactor, factor); }
   // 衝撃点へのシネマズーム（dur 秒かけて戻る。amt=ズーム量、省略時0.34）
   cineZoom(dur, x, y, amt) { this.cine = dur; this.cineMax = dur; this.zoomFocus = { x, y }; this.cineAmt = (amt == null ? 0.34 : amt); }
+  // 無傷でラウンドを取ったら PERFECT!（自分なら試合終了時にボーナス加点）
+  _checkPerfect(winner) {
+    if (winner.hp < winner.maxHp) return;
+    this.fx.callout("PERFECT!", "#ffd23d", H * 0.46);
+    const you = this.online && this.netRole === "guest" ? this.p2 : this.p1;
+    if (winner === you) this.perfectRounds++;
+  }
   onKO(loser) {
     if (this.state !== "fight") return;
     this.koTarget = loser;
     const winnerIdx = loser === this.p1 ? 1 : 0;
     this.wins[winnerIdx]++;
+    this._checkPerfect(loser === this.p1 ? this.p2 : this.p1);
     this.state = "roundEnd";
     this.banner = "K.O.!";
     this.bannerT = 2.6;
@@ -2329,7 +2377,7 @@ class Game {
         const rb = atk.getReachBox();
         if (rb && this.overlap(rb, def.hurtBox())) {
           atk.hasHit = true;
-          atk.meter = Math.min(MAX_METER, atk.meter + rb.move.meter);
+          atk.gainMeter(rb.move.meter);
           def.takeHit(rb.move, atk.facing, this);
         }
       }
@@ -2470,12 +2518,19 @@ class Game {
       this.projectiles = this.projectiles.filter(p => !p.dead);
       this.checkCombat();
 
+      // ピンチ演出：自分のHPが残りわずかの間、鼓動を鳴らす（音のみ・シムには影響しない）
+      const mine = this.online && this.netRole === "guest" ? this.p2 : this.p1;
+      if (this.state === "fight" && mine.hp > 0 && mine.hp <= PINCH_HP) {
+        this._hb = (this._hb || 0) - dt;
+        if (this._hb <= 0) { this._hb = 0.8; Audio_.heartbeat(); }
+      } else this._hb = 0;
+
       // タイムアップ判定は「まだfight中（KOで決着していない）」時のみ＝二重カウント防止
       if (this.state === "fight" && this.timer <= 0) {
         // タイムアップ：HP多い方の勝ち
         this.timer = 0;
         const w = this.p1.hp === this.p2.hp ? -1 : (this.p1.hp > this.p2.hp ? 0 : 1);
-        if (w >= 0) this.wins[w]++;   // 引き分けは勝ち星を入れない（次ラウンドへ持ち越し）
+        if (w >= 0) { this.wins[w]++; this._checkPerfect(w === 0 ? this.p1 : this.p2); }   // 引き分けは勝ち星を入れない（次ラウンドへ持ち越し）
         this.state = "roundEnd";
         this.banner = w === -1 ? "DRAW" : "TIME UP";
         this.bannerT = 2.6;
@@ -2501,7 +2556,8 @@ class Game {
             : (this.mode === "cpu" ? this.wins[0] >= 2 : true);
           if (youWonMatch) Audio_.victory(); else Audio_.defeat();
           // 戦績＆ポイントを記録（ローカル2人対戦は1Pの勝敗で計上）
-          this.lastResult = Stats.record(youWonMatch);
+          this.lastResult = Stats.record(youWonMatch,
+            { level: (!this.online && this.mode === "cpu") ? this.aiLevel : 0, perfect: this.perfectRounds });
           this.lastResultStart = this.t;   // ポイント弾みアニメの起点
           submitScore();                   // 世界ランキングへ合計ポイントを送信
         } else { this.round++; this.startRound(); }
@@ -2594,8 +2650,12 @@ class Game {
       else tr[k] = hp;
     }
     const bw = 500, bh = 30, my = 32;
-    this.drawBar(ctx, 40, my, bw, bh, this.p1.hp / 100, "#39d353", false, tr[0] / 100, false);
-    this.drawBar(ctx, W - 40 - bw, my, bw, bh, this.p2.hp / 100, "#ff4d4d", true, tr[1] / 100, false);
+    // ピンチ（残りHPわずか）はバーが点滅して危険を知らせる
+    const blink = Math.sin(this.t * 12) > 0;
+    const pinch1 = this.state === "fight" && this.p1.hp > 0 && this.p1.hp <= PINCH_HP;
+    const pinch2 = this.state === "fight" && this.p2.hp > 0 && this.p2.hp <= PINCH_HP;
+    this.drawBar(ctx, 40, my, bw, bh, this.p1.hp / 100, pinch1 && blink ? "#ff4d4d" : "#39d353", false, tr[0] / 100, false);
+    this.drawBar(ctx, W - 40 - bw, my, bw, bh, this.p2.hp / 100, pinch2 && blink ? "#ff9d5d" : "#ff4d4d", true, tr[1] / 100, false);
     // スーパーゲージ
     const mw = bw * 0.66, mh = 12, mty = my + bh + 9;
     this.drawMeter(ctx, 40, mty, mw, mh, this.p1.meter / MAX_METER, false);
@@ -2640,16 +2700,29 @@ class Game {
     if (b.indexOf("WIN") >= 0) { c0 = "#eafff7"; c1 = "#33e6a0"; glow = "rgba(70,255,200,.65)"; }       // 勝ち＝エメラルド
     else if (b.indexOf("LOSE") >= 0) { c0 = "#ffe0e0"; c1 = "#ff3d54"; glow = "rgba(255,70,90,.65)"; }   // 負け＝レッド
     else if (b === "K.O.!") { c0 = "#fff2a0"; c1 = "#ff3636"; glow = "rgba(255,80,60,.7)"; }            // KO＝紅
+    else if (b === "FINAL ROUND") { c0 = "#ffe4c8"; c1 = "#ff4a2d"; glow = "rgba(255,90,40,.75)"; }        // 最終ラウンド＝灼熱
     else if (b === "DRAW" || b === "TIME UP") { c0 = "#eef3ff"; c1 = "#9fb0d8"; glow = "rgba(140,170,230,.5)"; }
     else if (isFight) { c0 = "#fff2a0"; c1 = "#ff7a3d"; glow = "rgba(255,120,40,.7)"; }                  // FIGHT＝ホット
     const x = W / 2, y = big ? H / 2 - 40 : H * 0.32;
     ctx.translate(x, y); ctx.scale(pulse * pop, pulse * pop);
     this.drawNeonText(ctx, b, 0, 0, sz, c0, c1, glow, -0.14);
+    // CPU戦のラウンド開始：対戦相手のライバル名を見せる
+    if (this.state === "ready" && !this.online && this.mode === "cpu") {
+      ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+      ctx.font = "26px 'Russo One', system-ui";
+      ctx.shadowColor = "rgba(255,140,60,.8)"; ctx.shadowBlur = 12;
+      ctx.fillStyle = "#ffd9a0";
+      ctx.fillText("VS " + this.p2.name, 0, sz * 0.85);
+      ctx.shadowBlur = 0;
+    }
     // マッチ終了は下にサブテキスト
     if (big) {
       ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
       ctx.font = "20px 'Russo One', system-ui"; ctx.fillStyle = "rgba(255,255,255,.72)";
-      ctx.fillText(b.indexOf("WIN") >= 0 ? "★ VICTORY ★" : "DEFEAT", 0, sz * 0.62);
+      let sub = b.indexOf("WIN") >= 0 ? "★ VICTORY ★" : "DEFEAT";
+      if (b.indexOf("WIN") >= 0 && !this.online && this.mode === "cpu" && this.aiLevel >= 5 && this.wins[0] >= 2)
+        sub = "★ CHAMPION — 全ライバル制覇！ ★";
+      ctx.fillText(sub, 0, sz * 0.62);
     }
     ctx.restore();
   }
@@ -2705,14 +2778,29 @@ class Game {
     ctx.shadowBlur = 0;
     ctx.font = "16px 'Russo One', system-ui"; ctx.fillStyle = "#bdf0ff";
     ctx.fillText(sd.points + " pt", lx, 70);
+    // 次のランクまでの進捗バー（次の目標が常に見える）
+    const TH = [[0, 100, "FIGHTER"], [100, 300, "VETERAN"], [300, 700, "MASTER"], [700, 1500, "LEGEND"]];
+    const nxt = TH.find(t => sd.points < t[1]);
+    if (nxt) {
+      const pr = (sd.points - nxt[0]) / (nxt[1] - nxt[0]);
+      ctx.fillStyle = "rgba(255,255,255,.13)"; ctx.fillRect(lx, 79, 172, 7);
+      const pg = ctx.createLinearGradient(lx, 0, lx + 172, 0);
+      pg.addColorStop(0, "#ffae3d"); pg.addColorStop(1, "#ffe24d");
+      ctx.fillStyle = pg; ctx.fillRect(lx, 79, 172 * Math.max(0.02, pr), 7);
+      ctx.font = "12px system-ui"; ctx.fillStyle = "#9fb4e0";
+      ctx.fillText("あと " + (nxt[1] - sd.points) + " pt で " + nxt[2], lx, 101);
+    } else {
+      ctx.font = "12px system-ui"; ctx.fillStyle = "#ffd23d";
+      ctx.fillText("最高ランク LEGEND 到達！", lx, 101);
+    }
     ctx.font = "13px system-ui"; ctx.fillStyle = "#8fa3cf";
-    ctx.fillText(sd.matches + " 戦 " + sd.wins + " 勝" + (sd.bestStreak >= 2 ? " ・ 最高 " + sd.bestStreak + " 連勝" : ""), lx, 92);
+    ctx.fillText(sd.matches + " 戦 " + sd.wins + " 勝" + (sd.bestStreak >= 2 ? " ・ 最高 " + sd.bestStreak + " 連勝" : ""), lx, 121);
     // 世界ランキングボタン（左上）
     const lbPulse = 0.7 + Math.sin(this.t * 2.8) * 0.3;
     ctx.font = "15px 'Russo One', system-ui";
     ctx.shadowColor = "rgba(180,130,255," + lbPulse + ")"; ctx.shadowBlur = 12;
     ctx.fillStyle = "rgba(210,180,255," + (0.75 + lbPulse * 0.25) + ")";
-    ctx.fillText("🏆  世界ランキング", lx, 118);
+    ctx.fillText("🏆  世界ランキング", lx, 147);
     ctx.shadowBlur = 0;
     ctx.restore();
     ctx.restore();
@@ -2730,8 +2818,7 @@ class Game {
     ctx.fillStyle = g; ctx.fillText("SELECT LEVEL", W / 2, H * 0.16);
     ctx.shadowBlur = 0;
 
-    // 5段階のレベルバー
-    const labels = ["かんたん", "ふつう", "つよい", "とても強い", "鬼"];
+    // 5段階のレベルバー（レベルごとにライバルが待ち受ける）
     const n = 5, bw = 150, gap = 22, totalW = n * bw + (n - 1) * gap;
     const x0 = (W - totalW) / 2, by = H * 0.46, bh = 120;
     for (let i = 0; i < n; i++) {
@@ -2755,18 +2842,18 @@ class Game {
       ctx.font = "44px 'Black Ops One', Impact, system-ui";
       ctx.fillStyle = sel ? "#fff" : "rgba(255,255,255,.5)";
       ctx.fillText("Lv" + lv, x + bw / 2, by + 38);
-      // ラベル
+      // ライバル名（レベルごとの対戦相手）
       ctx.font = "16px 'Russo One', system-ui";
       ctx.fillStyle = sel ? `hsl(${hue},90%,75%)` : "rgba(180,195,230,.55)";
-      ctx.fillText(labels[i], x + bw / 2, by + 74);
+      ctx.fillText(RIVALS[i].name, x + bw / 2, by + 74);
     }
     // 選択中レベルの説明
     const descs = [
-      "ほとんどガードしない。連打が通る入門用。",
-      "たまにガード。基本の手応え。",
-      "読んでガード、隙にカウンター。標準。",
-      "高確率でガード。空振りを的確に狩る。",
-      "ほぼ完璧な防御と即カウンター。歴戦向け。",
+      "【かんたん】新米のコルト。ほとんどガードしない入門用。",
+      "【ふつう】俊足のヴォルト。たまにガード。基本の手応え。",
+      "【つよい】豪腕ブルーノ。読んでガード、隙にカウンター。",
+      "【とても強い】妖影レイヴン。高確率でガードし空振りを狩る。",
+      "【鬼】覇王オーガ。ほぼ完璧な防御と即カウンター。歴戦向け。",
     ];
     ctx.font = "20px system-ui"; ctx.fillStyle = "#cdd8f5";
     ctx.fillText(descs[this.aiLevel - 1], W / 2, by + bh + 56);
@@ -2819,6 +2906,15 @@ class Game {
       ctx.restore();
     }
 
+    // ピンチの赤ビネット（自分のHPが残りわずか＝画面の縁が脈動する）
+    const pinchMine = this.online && this.netRole === "guest" ? this.p2 : this.p1;
+    if (this.state === "fight" && pinchMine.hp > 0 && pinchMine.hp <= PINCH_HP) {
+      const va = 0.14 + 0.09 * Math.sin(this.t * 6);
+      const pvg = ctx.createRadialGradient(W / 2, H / 2, H * 0.36, W / 2, H / 2, H * 0.75);
+      pvg.addColorStop(0, "rgba(255,40,40,0)"); pvg.addColorStop(1, "rgba(255,30,30," + va.toFixed(3) + ")");
+      ctx.fillStyle = pvg; ctx.fillRect(0, 0, W, H);
+    }
+
     this.drawHUD(ctx);
     this.drawBanner(ctx);
     if (this.state === "matchEnd" && !this.online) {
@@ -2844,12 +2940,13 @@ class Game {
         ctx.fillStyle = "#ffd23d";
         ctx.fillText("+" + shown + " pt", 0, 0);
         ctx.restore();
-        // RANK / 通算（静止）
+        // 内訳 / RANK / 通算（静止）
         ctx.shadowBlur = 0;
+        if (r.breakdown) { ctx.font = "12px system-ui"; ctx.fillStyle = "#ffe9a8"; ctx.fillText(r.breakdown, lx, ly + 21); }
         ctx.font = "15px 'Russo One', system-ui"; ctx.fillStyle = "#bdf0ff";
-        ctx.fillText("RANK " + r.rank, lx, ly + 23);
+        ctx.fillText("RANK " + r.rank, lx, ly + 42);
         ctx.font = "13px system-ui"; ctx.fillStyle = "#9fb4e0";
-        ctx.fillText("通算 " + r.matches + " 戦 " + r.wins + " 勝" + (r.streak >= 2 ? " ・ " + r.streak + " 連勝中" : ""), lx, ly + 44);
+        ctx.fillText("通算 " + r.matches + " 戦 " + r.wins + " 勝" + (r.streak >= 2 ? " ・ " + r.streak + " 連勝中" : ""), lx, ly + 62);
         ctx.restore();
       }
       // 中央の操作案内
@@ -3135,7 +3232,7 @@ canvas.addEventListener("click", (e) => {
   const rect = canvas.getBoundingClientRect();
   const cx = (e.clientX - rect.left) * (W / rect.width);
   const cy = (e.clientY - rect.top) * (H / rect.height);
-  if (cx >= 20 && cx <= 320 && cy >= 100 && cy <= 132) { openLeaderboard(); }
+  if (cx >= 20 && cx <= 320 && cy >= 130 && cy <= 162) { openLeaderboard(); }
 });
 btnStart.onclick = () => { Net.begin(); };      // ホスト：対戦開始
 btnRematch.onclick = () => { hide(rematchEl); Net.begin(); };   // ホスト：再戦
